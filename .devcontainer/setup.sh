@@ -19,3 +19,4 @@ if [ -f "package.json" ]; then
 fi
 
 echo "✅ SentinelScan Environment Ready. Ports 5678 (n8n) and 3000 (React) are open."
+touch .setup_complete
