@@ -1,0 +1,36 @@
+# Environment Variables & Secrets
+.env
+.env.*
+!.env.example
+env/
+**/env/*
+secrets.json
+
+# API Keys & Local Configs
+keys.txt
+auth_config.json
+service_account.json
+
+# Node.js (for n8n & Dashboard)
+node_modules/
+npm-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# Python (for the Regex Engine)
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+.venv/
+pip-log.txt
+
+# OS Specific (Fedora/Linux/Mac)
+.DS_Store
+Thumbs.db
+.fuse_hidden*
+.directory
+.Trash-*
+
+# n8n Local Data
+.n8n/

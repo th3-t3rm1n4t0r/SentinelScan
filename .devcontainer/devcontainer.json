@@ -1,0 +1,28 @@
+
+  "name": "SentinelScan-Engine",
+  "image": "mcr.microsoft.com/devcontainers/universal:2",
+  "features": {
+    "ghcr.io/devcontainers/features/docker-in-docker:1": {},
+    "ghcr.io/devcontainers/features/python:1": { "version": "3.12" },
+    "ghcr.io/devcontainers/features/node:1": { "version": "20" }
+  },
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-python.python",
+        "esbenp.prettier-vscode",
+    	"ms-azuretools.vscode-docker",
+    	"humao.rest-client",
+    	"usernamehw.errorlens",
+    	"sonarsource.sonarlint",
+    	"aaron-bond.better-comments",
+    	"eamodio.gitlens",
+    	"dsznajder.es7-react-js-snippets",
+    	"redhat.vscode-yaml",
+    	"rangav.vscode-thunder-client"
+      ]
+    }
+  },
+  "forwardPorts":,
+  "postCreateCommand": "bash .devcontainer/setup.sh"
+}
