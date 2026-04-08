@@ -5,6 +5,7 @@
 env/
 **/env/*
 secrets.json
+*.pem
 
 # API Keys & Local Configs
 keys.txt
