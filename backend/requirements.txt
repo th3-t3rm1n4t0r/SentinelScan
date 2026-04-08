@@ -1,4 +1,4 @@
-
+httpx
 fastapi
 uvicorn
 python-dotenv
@@ -10,3 +10,4 @@ semgrep
 pydantic
 reportlab
 gitpython
+pyjwt
