@@ -1,4 +1,12 @@
 
 fastapi
 uvicorn
-httpx
+python-dotenv
+requests
+openai
+google-generativeai
+bandit
+semgrep
+pydantic
+reportlab
+gitpython

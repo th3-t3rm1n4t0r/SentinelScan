@@ -1,8 +1,12 @@
 import httpx
 import json
+import os
+from dotenv import load_dotenv, find_dotenv
+
+load_dotenv(find_dotenv())
 
 GITHUB_TOKEN = "ADD_GITHUB_TOKEN"
-LLM_API_KEY = "ADD_OPENAI_KEY"
+LLM_API_KEY = os.getenv("OPENAI_API_KEY")
 
 async def get_repo_tree(owner, repo, sha):
     url = f"https://api.github.com/repos/{owner}/{repo}/git/trees/{sha}?recursive=1"
