@@ -1,13 +1,52 @@
+# =========================
+# API
+# =========================
+fastapi
+uvicorn[standard]
+pydantic
+
+# =========================
+# HTTP CLIENT
+# =========================
 httpx
-fastapi[standard]
-uvicorn
-python-dotenv
 requests
+
+# =========================
+# ENV
+# =========================
+python-dotenv
+
+# =========================
+# AI
+# =========================
 openai
 google-generativeai
+
+# =========================
+# SECURITY SCANNERS
+# =========================
 bandit
 semgrep
-pydantic
-reportlab
+
+# =========================
+# GITHUB
+# =========================
 gitpython
 pyjwt
+
+# =========================
+# REPORT
+# =========================
+reportlab
+
+# =========================
+# DATABASE
+# =========================
+sqlalchemy
+psycopg2-binary
+
+# =========================
+# BACKGROUND TASKS
+# =========================
+celery
+redis
