@@ -1,5 +1,5 @@
 httpx
-fastapi
+fastapi[standard]
 uvicorn
 python-dotenv
 requests
