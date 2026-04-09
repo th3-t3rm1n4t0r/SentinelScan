@@ -1,220 +1,227 @@
 import httpx
 import asyncio
 import logging
-import base64
-from typing import List, Dict, Optional
+from typing import List, Dict
 
 from app.config import settings
 
 
-logger = logging.getLogger("sentinel_scan.github")
+logger = logging.getLogger("sentinel_scan.ai")
 
 
 # =========================
 # SETTINGS
 # =========================
 
-SUPPORTED_EXTENSIONS = (
-    ".py",
-    ".js",
-    ".ts",
-    ".java",
-    ".go",
-    ".rs",
-    ".php",
-    ".cs",
-    ".cpp",
-    ".c",
-    ".jsx",
-    ".tsx",
-    ".json",
-    ".yaml",
-    ".yml",
-    ".toml",
-    ".env"
-)
+AI_TIMEOUT = settings.AI_TIMEOUT
+MAX_CHARS = settings.AI_MAX_CHARS
+AI_RETRIES = settings.AI_RETRIES
 
-MAX_FILES = settings.MAX_FILES
-MAX_FILE_SIZE_KB = settings.MAX_FILE_SIZE_KB
+MODEL = settings.AI_MODEL
 
 
 # =========================
-# MAIN ENTRY
+# PROMPT TEMPLATE
 # =========================
 
-def get_repo_tree(
-    repo_url: str,
-    branch: Optional[str] = None
-) -> List[Dict]:
+SYSTEM_PROMPT = """
+You are a senior Application Security Engineer.
 
-    owner, repo = extract_owner_repo(repo_url)
+Analyze the provided source code for:
 
-    branch = branch or settings.GITHUB_DEFAULT_BRANCH
+1. OWASP Top 10 vulnerabilities
+2. Hardcoded secrets
+3. Unsafe coding practices
+4. Security misconfigurations
+5. Injection vulnerabilities
+6. Authentication issues
+7. Data exposure risks
 
-    logger.info(f"Fetching repo tree {owner}/{repo}@{branch}")
+Respond ONLY in JSON format:
 
-    tree_url = f"{settings.GITHUB_API_BASE}/repos/{owner}/{repo}/git/trees/{branch}?recursive=1"
+{
+  "issues":[
+    {
+      "severity":"high|medium|low",
+      "title":"short title",
+      "description":"technical explanation",
+      "file":"filepath",
+      "recommendation":"fix suggestion"
+    }
+  ]
+}
 
-    headers = build_headers()
-
-    try:
-        response = httpx.get(
-            tree_url,
-            headers=headers,
-            timeout=40
-        )
-
-        if response.status_code == 404:
-            raise Exception(f"Repository or branch not found: {repo}@{branch}")
-
-        response.raise_for_status()
-
-    except Exception as e:
-        logger.error(f"GitHub tree fetch failed: {str(e)}")
-        raise
+DO NOT include markdown.
+DO NOT include explanations outside JSON.
+"""
 
 
-    tree = response.json().get("tree", [])
+# =========================
+# PUBLIC FUNCTION
+# =========================
 
-    file_urls = []
+async def analyze_code(files: List[Dict]) -> Dict:
 
-    for item in tree:
+    if not files:
+        return {"issues": []}
 
-        if item.get("type") != "blob":
-            continue
+    context = build_context(files)
 
-        if not item.get("path", "").endswith(SUPPORTED_EXTENSIONS):
-            continue
+    payload = build_payload(context)
 
-        if item.get("size", 0) > MAX_FILE_SIZE_KB * 1024:
-            continue
+    result = await call_ai(payload)
 
-        file_urls.append(item.get("url"))
+    return parse_ai_response(result)
 
-        if len(file_urls) >= MAX_FILES:
+
+# =========================
+# BUILD CONTEXT
+# =========================
+
+def build_context(files: List[Dict]) -> str:
+
+    chunks = []
+
+    total_chars = 0
+
+    for f in files:
+
+        content = f.get("content","")
+
+        safe_content = sanitize_input(content)
+
+        chunk = f"""
+FILE: {f.get("path")}
+
+{safe_content}
+"""
+
+        total_chars += len(chunk)
+
+        if total_chars > MAX_CHARS:
             break
 
+        chunks.append(chunk)
 
-    logger.info(f"Files selected for scan: {len(file_urls)}")
-
-    return run_async_download(file_urls, headers)
+    return "\n\n".join(chunks)
 
 
 # =========================
-# ASYNC DOWNLOAD
+# PROMPT SAFETY
 # =========================
 
-def run_async_download(
-    urls: List[str],
-    headers: Dict
-):
+def sanitize_input(text: str) -> str:
 
-    return asyncio.run(
-        fetch_all_files(
-            urls,
-            headers
-        )
-    )
+    dangerous = [
+        "ignore previous instructions",
+        "system prompt",
+        "override rules",
+        "disregard"
+    ]
+
+    lower = text.lower()
+
+    for d in dangerous:
+
+        if d in lower:
+            return ""
+
+    return text[:5000]
 
 
-async def fetch_all_files(
-    urls: List[str],
-    headers: Dict
-):
+# =========================
+# BUILD API PAYLOAD
+# =========================
 
-    async with httpx.AsyncClient(timeout=40) as client:
+def build_payload(context: str) -> Dict:
 
-        tasks = [
-            fetch_file(
-                client,
-                url,
-                headers
+    return {
+
+        "model": MODEL,
+
+        "messages":[
+
+            {
+                "role":"system",
+                "content": SYSTEM_PROMPT
+            },
+
+            {
+                "role":"user",
+                "content": context
+            }
+
+        ],
+
+        "temperature": 0.1
+
+    }
+
+
+# =========================
+# AI CALL
+# =========================
+
+async def call_ai(payload: Dict) -> Dict:
+
+    headers = {
+
+        "Authorization": f"Bearer {settings.OPENAI_API_KEY}",
+
+        "Content-Type": "application/json"
+    }
+
+    for attempt in range(AI_RETRIES):
+
+        try:
+
+            async with httpx.AsyncClient(timeout=AI_TIMEOUT) as client:
+
+                r = await client.post(
+
+                    settings.AI_ENDPOINT,
+
+                    headers=headers,
+
+                    json=payload
+
+                )
+
+                r.raise_for_status()
+
+                return r.json()
+
+        except Exception as e:
+
+            logger.warning(
+                f"AI retry {attempt+1} failed: {str(e)}"
             )
-            for url in urls
-        ]
 
-        results = await asyncio.gather(
-            *tasks,
-            return_exceptions=True
-        )
+            await asyncio.sleep(1)
 
-        return [
-            r for r in results
-            if isinstance(r, dict)
-        ]
+    raise Exception("AI service unavailable")
 
 
-async def fetch_file(
-    client: httpx.AsyncClient,
-    url: str,
-    headers: Dict
-):
+# =========================
+# RESPONSE PARSER
+# =========================
+
+def parse_ai_response(data: Dict) -> Dict:
 
     try:
 
-        r = await client.get(
-            url,
-            headers=headers
-        )
+        content = data["choices"][0]["message"]["content"]
 
-        r.raise_for_status()
+        import json
 
-        data = r.json()
+        parsed = json.loads(content)
 
-        return {
-
-            "path": data.get("path"),
-
-            "content": decode_base64(
-                data.get("content", "")
-            )
-
-        }
+        return parsed
 
     except Exception as e:
 
-        logger.warning(
-            f"File fetch failed {url} | {str(e)}"
-        )
-
-        return None
-
-
-# =========================
-# HELPERS
-# =========================
-
-def extract_owner_repo(
-    repo_url: str
-):
-
-    parts = repo_url.rstrip("/").split("/")
-
-    return parts[-2], parts[-1]
-
-
-def decode_base64(
-    content: str
-):
-
-    try:
-
-        return base64.b64decode(content).decode(
-            "utf-8",
-            errors="ignore"
-        )
-
-    except Exception:
-
-        return ""
-
-
-def build_headers():
-
-    if settings.GITHUB_TOKEN:
+        logger.error(f"AI parse failed: {str(e)}")
 
         return {
-            "Authorization": f"Bearer {settings.GITHUB_TOKEN}"
+            "issues":[]
         }
-
-    return {}  

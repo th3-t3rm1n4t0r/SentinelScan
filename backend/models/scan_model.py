@@ -1,4 +1,13 @@
-from sqlalchemy import Column, Integer, String, DateTime, JSON, func
+from sqlalchemy import (
+    Column,
+    Integer,
+    String,
+    DateTime,
+    JSON,
+    func,
+    Index
+)
+
 from datetime import datetime
 
 from app.database import Base
@@ -34,7 +43,7 @@ class ScanHistory(Base):
 
     task_id = Column(
 
-        String,
+        String(120),
 
         unique=True,
 
@@ -51,7 +60,7 @@ class ScanHistory(Base):
 
     repo = Column(
 
-        String,
+        String(300),
 
         nullable=False,
 
@@ -62,18 +71,22 @@ class ScanHistory(Base):
 
     branch = Column(
 
-        String,
+        String(120),
 
-        nullable=True
+        nullable=True,
+
+        index=True
 
     )
 
 
     scan_type = Column(
 
-        String,
+        String(50),
 
-        default="repo"  # repo | pull_request | webhook
+        default="repo",   # repo | pull_request | webhook
+
+        index=True
 
     )
 
@@ -84,7 +97,7 @@ class ScanHistory(Base):
 
     status = Column(
 
-        String,
+        String(50),
 
         default="queued",
 
@@ -99,7 +112,7 @@ class ScanHistory(Base):
 
     report_id = Column(
 
-        String,
+        String(80),
 
         nullable=True,
 
@@ -134,7 +147,7 @@ class ScanHistory(Base):
 
     error_message = Column(
 
-        String,
+        String(2000),
 
         nullable=True
 
@@ -149,7 +162,9 @@ class ScanHistory(Base):
 
         DateTime(timezone=True),
 
-        server_default=func.now()
+        server_default=func.now(),
+
+        index=True
 
     )
 
@@ -158,7 +173,9 @@ class ScanHistory(Base):
 
         DateTime(timezone=True),
 
-        nullable=True
+        nullable=True,
+
+        index=True
 
     )
 
@@ -173,22 +190,59 @@ class ScanHistory(Base):
 
 
     # =========================
-    # HELPER METHOD
+    # INDEXES
     # =========================
+
+    __table_args__ = (
+
+        Index("idx_repo_status", "repo", "status"),
+
+        Index("idx_task_status", "task_id", "status"),
+
+    )
+
+
+    # =========================
+    # HELPER METHODS
+    # =========================
+
+    def mark_running(self):
+
+        self.status = "running"
+
 
     def mark_completed(self):
 
+        self.status = "completed"
+
         self.completed_at = datetime.utcnow()
 
-        if self.created_at:
+        self.calculate_duration()
+
+
+    def mark_failed(self, error: str):
+
+        self.status = "failed"
+
+        self.error_message = error
+
+        self.completed_at = datetime.utcnow()
+
+        self.calculate_duration()
+
+
+    def calculate_duration(self):
+
+        if self.created_at and self.completed_at:
 
             self.duration = int(
 
                 (
+
                     self.completed_at -
 
                     self.created_at
 
                 ).total_seconds()
 
-            )  
+            ) 

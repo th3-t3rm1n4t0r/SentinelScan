@@ -4,13 +4,18 @@ import logging
 from datetime import datetime
 
 from services.github_tree_service import get_repo_tree
-from services.owasp_scanner import scan_files, summarize_findings
-from services.ai_service import ai_fix
+from services.context_selector import select_context
+from services.pii_scrubber import mask_pii
+
+from services.owasp_scanner import (
+    scan_files,
+    summarize_findings
+)
+
+from services.ai_service import analyze_code
+
 from services.report_service import create_report
 from services.webhook_service import notify_n8n
-
-from services.pii_scrubber import mask_pii
-from services.context_selector import select_relevant_files
 from services.github_pr_service import create_fix_pr
 
 from models.scan_history import ScanHistory
@@ -54,18 +59,10 @@ def run_scan(
 
     logger.info(
 
-        f"scan started "
-
-        f"repo={repo_url} "
-
-        f"task={task_id}"
+        f"scan started repo={repo_url} task={task_id}"
 
     )
 
-
-    # =====================
-    # CREATE DB RECORD
-    # =====================
 
     scan_record = ScanHistory(
 
@@ -81,6 +78,7 @@ def run_scan(
 
     )
 
+
     db.add(scan_record)
 
     db.commit()
@@ -89,15 +87,10 @@ def run_scan(
     try:
 
         # =====================
-        # FETCH REPO FILES
+        # FETCH FILES
         # =====================
 
-        all_files = get_repo_tree(
-
-            repo_url
-
-        )
-
+        all_files = get_repo_tree(repo_url)
 
         logger.info(
 
@@ -107,35 +100,10 @@ def run_scan(
 
 
         # =====================
-        # CONTEXT FILTER
+        # SELECT CONTEXT
         # =====================
 
-        paths = [
-
-            f["path"]
-
-            for f in all_files
-
-        ]
-
-
-        selected_paths = select_relevant_files(
-
-            issue_text,
-
-            paths
-
-        ) if issue_text else paths
-
-
-        files = [
-
-            f for f in all_files
-
-            if f["path"] in selected_paths
-
-        ]
-
+        files = select_context(all_files)
 
         logger.info(
 
@@ -145,7 +113,7 @@ def run_scan(
 
 
         # =====================
-        # PII SCRUB
+        # MASK PII
         # =====================
 
         for f in files:
@@ -161,12 +129,7 @@ def run_scan(
         # OWASP SCAN
         # =====================
 
-        findings = scan_files(
-
-            files
-
-        )
-
+        findings = scan_files(files)
 
         severity_summary = summarize_findings(
 
@@ -183,18 +146,22 @@ def run_scan(
 
 
         # =====================
-        # AI FIX
+        # AI FIX SUGGESTIONS
         # =====================
 
-        fixes = ai_fix(
+        ai_results = analyze_code(files)
 
-            findings
+        fixes = ai_results.get(
+
+            "issues",
+
+            []
 
         )
 
 
         # =====================
-        # CREATE PR
+        # CREATE FIX PR
         # =====================
 
         pr_url = None
@@ -240,7 +207,7 @@ def run_scan(
 
 
         # =====================
-        # UPDATE DB RECORD
+        # UPDATE DB
         # =====================
 
         end_time = datetime.utcnow()
@@ -300,9 +267,7 @@ def run_scan(
 
         logger.info(
 
-            f"scan completed "
-
-            f"task={task_id}"
+            f"scan completed task={task_id}"
 
         )
 
@@ -313,13 +278,12 @@ def run_scan(
     except Exception as e:
 
 
+        db.rollback()
+
+
         logger.error(
 
-            f"scan failed "
-
-            f"task={task_id} "
-
-            f"{str(e)}"
+            f"scan failed task={task_id} {str(e)}"
 
         )
 
@@ -327,7 +291,6 @@ def run_scan(
         scan_record.status = "failed"
 
         scan_record.error_message = str(e)
-
 
         scan_record.completed_at = datetime.utcnow()
 

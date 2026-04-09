@@ -2,7 +2,9 @@ import json
 import os
 import uuid
 import logging
+
 from datetime import datetime
+
 from typing import List, Dict, Optional
 
 
@@ -43,20 +45,37 @@ def create_report(
 ) -> Dict:
 
 
-    report_id = str(uuid.uuid4())[:8]
+    report_id = str(
+        uuid.uuid4()
+    )[:8]
 
 
     timestamp = datetime.utcnow().isoformat()
 
 
-    json_path = f"{REPORT_DIR}/scan_{report_id}.json"
+    json_path = os.path.join(
 
-    html_path = f"{REPORT_DIR}/scan_{report_id}.html"
+        REPORT_DIR,
+
+        f"scan_{report_id}.json"
+
+    )
 
 
-    # =====================
-    # SUMMARY
-    # =====================
+    html_path = os.path.join(
+
+        REPORT_DIR,
+
+        f"scan_{report_id}.html"
+
+    )
+
+
+    findings = deduplicate_findings(
+
+        findings
+    )
+
 
     severity_count = {
 
@@ -74,17 +93,26 @@ def create_report(
     for f in findings:
 
         sev = str(
+
             f.get(
+
                 "severity",
+
                 "low"
+
             )
+
         ).lower()
 
 
         severity_count.setdefault(
+
             sev,
+
             0
+
         )
+
 
         severity_count[sev] += 1
 
@@ -119,15 +147,24 @@ def create_report(
     # =====================
 
     with open(
+
         json_path,
+
         "w",
+
         encoding="utf-8"
+
     ) as f:
 
+
         json.dump(
+
             report_data,
+
             f,
+
             indent=2
+
         )
 
 
@@ -136,23 +173,34 @@ def create_report(
     # =====================
 
     html_content = build_html_report(
+
         report_data
+
     )
 
 
     with open(
+
         html_path,
+
         "w",
+
         encoding="utf-8"
+
     ) as f:
 
+
         f.write(
+
             html_content
+
         )
 
 
     logger.info(
+
         f"report created {report_id}"
+
     )
 
 
@@ -174,7 +222,9 @@ def create_report(
 # =========================
 
 def build_html_report(
+
     data: Dict
+
 ) -> str:
 
 
@@ -185,10 +235,15 @@ def build_html_report(
 
 
         severity = str(
+
             f.get(
+
                 "severity",
+
                 "low"
+
             )
+
         ).lower()
 
 
@@ -200,7 +255,7 @@ def build_html_report(
 
 <td>{escape_html(f.get("issue"))}</td>
 
-<td class="{severity}">{severity}</td>
+<td class="badge {severity}">{severity}</td>
 
 <td>{f.get("line")}</td>
 
@@ -223,8 +278,11 @@ def build_html_report(
 
 
     for fix in data.get(
+
         "fixes",
+
         []
+
     ):
 
 
@@ -303,31 +361,45 @@ color:white;
 
 }}
 
+.badge {{
+
+padding:4px 8px;
+
+border-radius:4px;
+
+font-size:12px;
+
+}}
+
 .critical {{
 
-color:red;
+background:#ff4d4f;
 
-font-weight:bold;
+color:white;
 
 }}
 
 .high {{
 
-color:orange;
+background:#fa8c16;
 
-font-weight:bold;
+color:white;
 
 }}
 
 .medium {{
 
-color:#0057d9;
+background:#1677ff;
+
+color:white;
 
 }}
 
 .low {{
 
-color:#444;
+background:#888;
+
+color:white;
 
 }}
 
@@ -425,17 +497,62 @@ border-radius:6px;
 
 """
 
+
     return html
 
 
 # =========================
-# HTML ESCAPE
+# HELPERS
 # =========================
 
-def escape_html(text: str) -> str:
+def deduplicate_findings(
+
+    findings: List[Dict]
+
+):
+
+    seen = set()
+
+    result = []
+
+
+    for f in findings:
+
+        key = (
+
+            f.get("file"),
+
+            f.get("issue"),
+
+            f.get("line")
+
+        )
+
+
+        if key in seen:
+
+            continue
+
+
+        seen.add(key)
+
+        result.append(f)
+
+
+    return result
+
+
+def escape_html(
+
+    text: str
+
+) -> str:
+
 
     if not text:
+
         return ""
+
 
     return (
 
@@ -447,4 +564,4 @@ def escape_html(text: str) -> str:
 
         .replace(">", "&gt;")
 
-    )    
+    )

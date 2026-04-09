@@ -1,23 +1,21 @@
-import httpx
-import asyncio
 import logging
-import base64
-from typing import List, Dict, Optional
+import re
+from typing import List, Dict
 
 from app.config import settings
 
 
-logger = logging.getLogger(
-    "sentinel_scan.github"
-)
+logger = logging.getLogger("sentinel_scan.context")
 
 
 # =========================
 # SETTINGS
 # =========================
 
-SUPPORTED_EXTENSIONS = (
+MAX_FILES = settings.MAX_FILES
+MAX_CHARS = settings.AI_MAX_CHARS
 
+SUPPORTED_EXTENSIONS = (
     ".py",
     ".js",
     ".ts",
@@ -35,301 +33,238 @@ SUPPORTED_EXTENSIONS = (
     ".yml",
     ".toml",
     ".env"
-
 )
 
-MAX_FILES = settings.MAX_FILES
-MAX_FILE_SIZE_KB = settings.MAX_FILE_SIZE_KB
+# priority keywords
+SECURITY_KEYWORDS = (
+    "auth",
+    "login",
+    "password",
+    "secret",
+    "token",
+    "key",
+    "crypto",
+    "jwt",
+    "session",
+    "admin",
+    "permission",
+    "config",
+    "database",
+    "connection",
+    "oauth",
+    "env",
+)
+
+IGNORE_FOLDERS = (
+    "node_modules",
+    "dist",
+    "build",
+    "venv",
+    ".git",
+    "__pycache__",
+    ".next",
+    ".cache"
+)
 
 
 # =========================
-# MAIN ENTRY
+# MAIN FUNCTION
 # =========================
 
-def get_repo_tree(
+def select_context(files: List[Dict]) -> List[Dict]:
 
-    repo_url: str,
+    if not files:
+        return []
 
-    branch: Optional[str] = None
+    logger.info(f"Selecting context from {len(files)} files")
 
-) -> List[Dict]:
+    filtered = filter_files(files)
 
-    owner, repo = extract_owner_repo(
-        repo_url
-    )
+    prioritized = prioritize_files(filtered)
 
-    branch = branch or settings.GITHUB_DEFAULT_BRANCH
+    trimmed = trim_content(prioritized)
 
-    tree_url = f"{settings.GITHUB_API_BASE}/repos/{owner}/{repo}/git/trees/{branch}?recursive=1"
+    logger.info(f"Context selected: {len(trimmed)} files")
 
-    headers = build_headers()
+    return trimmed
 
-    logger.info(
-        f"Fetching repo tree {owner}/{repo}@{branch}"
-    )
 
-    response = safe_request(
-        tree_url,
-        headers
-    )
+# =========================
+# FILTER FILES
+# =========================
 
-    tree = response.get(
-        "tree",
-        []
-    )
+def filter_files(files: List[Dict]) -> List[Dict]:
 
-    file_urls = []
+    result = []
 
-    for item in tree:
+    seen_paths = set()
 
-        if item.get("type") != "blob":
+    for f in files:
+
+        path = f.get("path", "").lower()
+
+        content = f.get("content", "")
+
+        if not path or not content:
             continue
 
-        path = item.get(
-            "path",
-            ""
-        )
-
-        size = item.get(
-            "size",
-            0
-        )
-
-        if not path.endswith(
-            SUPPORTED_EXTENSIONS
-        ):
+        # skip duplicates
+        if path in seen_paths:
             continue
 
-        if size > MAX_FILE_SIZE_KB * 1024:
+        seen_paths.add(path)
+
+        # extension filter
+        if not path.endswith(SUPPORTED_EXTENSIONS):
             continue
 
-        file_urls.append(
-            item["url"]
-        )
+        # ignore folders
+        if any(folder in path for folder in IGNORE_FOLDERS):
+            continue
 
-        if len(file_urls) >= MAX_FILES:
+        # skip binary-like files
+        if is_binary(content):
+            continue
+
+        result.append(f)
+
+        if len(result) >= MAX_FILES * 2:
             break
 
-    logger.info(
-        f"Files selected for scan: {len(file_urls)}"
-    )
-
-    return run_async_download(
-        file_urls,
-        headers
-    )
+    return result
 
 
 # =========================
-# SAFE HTTP REQUEST
+# PRIORITIZATION
 # =========================
 
-def safe_request(
-    url: str,
-    headers: Dict,
-    retries: int = 2
-):
+def prioritize_files(files: List[Dict]) -> List[Dict]:
 
-    for attempt in range(
-        retries + 1
-    ):
+    scored = []
 
-        try:
+    for f in files:
 
-            r = httpx.get(
-                url,
-                headers=headers,
-                timeout=40
-            )
+        path = f.get("path", "").lower()
 
-            if r.status_code == 404:
+        content = f.get("content", "").lower()
 
-                raise Exception(
-                    "Repository or branch not found"
-                )
+        score = 0
 
-            if r.status_code == 403:
+        # boost security relevant files
+        for keyword in SECURITY_KEYWORDS:
 
-                logger.warning(
-                    "GitHub rate limit or permission issue"
-                )
+            if keyword in path:
+                score += 3
 
-            r.raise_for_status()
+            if keyword in content:
+                score += 1
 
-            return r.json()
+        # boost config files
+        if "config" in path:
+            score += 2
 
-        except Exception as e:
+        # boost env
+        if ".env" in path:
+            score += 4
 
-            logger.warning(
-                f"Retry {attempt+1} failed: {str(e)}"
-            )
+        # smaller files often more important
+        length = len(content)
 
-    raise Exception(
-        "GitHub API request failed"
-    )
+        if length < 2000:
+            score += 1
+
+        scored.append((score, f))
+
+    scored.sort(key=lambda x: x[0], reverse=True)
+
+    return [f for _, f in scored[:MAX_FILES]]
 
 
 # =========================
-# ASYNC DOWNLOAD
+# CONTENT TRIMMING
 # =========================
 
-def run_async_download(
-    urls: List[str],
-    headers: Dict
-):
+def trim_content(files: List[Dict]) -> List[Dict]:
 
-    try:
+    result = []
 
-        loop = asyncio.get_event_loop()
+    total_chars = 0
 
-        if loop.is_running():
+    for f in files:
 
-            return asyncio.run(
-                fetch_all_files(
-                    urls,
-                    headers
-                )
-            )
+        content = clean_content(f["content"])
 
-    except RuntimeError:
+        size = len(content)
 
-        pass
+        if total_chars + size > MAX_CHARS:
 
-    return asyncio.run(
-        fetch_all_files(
-            urls,
-            headers
-        )
-    )
+            remaining = MAX_CHARS - total_chars
 
+            if remaining <= 0:
+                break
 
-async def fetch_all_files(
-    urls: List[str],
-    headers: Dict
-):
+            content = content[:remaining]
 
-    async with httpx.AsyncClient(
-        timeout=40
-    ) as client:
+        result.append({
 
-        tasks = [
+            "path": f["path"],
 
-            fetch_file(
-                client,
-                url,
-                headers
-            )
+            "content": content
 
-            for url in urls
+        })
 
-        ]
+        total_chars += len(content)
 
-        results = await asyncio.gather(
-            *tasks,
-            return_exceptions=True
-        )
-
-        return [
-
-            r for r in results
-
-            if isinstance(
-                r,
-                dict
-            )
-        ]
-
-
-async def fetch_file(
-    client,
-    url,
-    headers
-):
-
-    try:
-
-        r = await client.get(
-            url,
-            headers=headers
-        )
-
-        r.raise_for_status()
-
-        data = r.json()
-
-        return {
-
-            "path": data.get(
-                "path"
-            ),
-
-            "content": decode_base64(
-                data.get(
-                    "content",
-                    ""
-                )
-            )
-
-        }
-
-    except Exception as e:
-
-        logger.warning(
-            f"File fetch failed {url} | {str(e)}"
-        )
-
-        return None
+    return result
 
 
 # =========================
 # HELPERS
 # =========================
 
-def extract_owner_repo(
-    repo_url: str
-):
+def is_binary(text: str) -> bool:
 
-    parts = repo_url.rstrip(
-        "/"
-    ).split("/")
+    if not text:
+        return True
 
-    if len(parts) < 2:
+    # detect many non printable chars
+    non_printable = sum(
 
-        raise Exception(
-            "Invalid GitHub URL"
-        )
+        1 for c in text
 
-    return parts[-2], parts[-1]
+        if ord(c) < 9 or (13 < ord(c) < 32)
 
+    )
 
-def decode_base64(
-    content: str
-):
-
-    try:
-
-        return base64.b64decode(
-            content
-        ).decode(
-            "utf-8",
-            errors="ignore"
-        )
-
-    except Exception:
-
-        return ""
+    return non_printable > 20
 
 
-def build_headers():
+def clean_content(text: str) -> str:
 
-    if settings.GITHUB_TOKEN:
+    # remove very long base64 strings
+    text = re.sub(
 
-        return {
+        r"[A-Za-z0-9+/]{200,}={0,2}",
 
-            "Authorization":
+        "[BASE64_REMOVED]",
 
-            f"Bearer {settings.GITHUB_TOKEN}"
+        text
 
-        }
+    )
 
-    return {}    
+    # remove very long lines
+    lines = text.splitlines()
+
+    cleaned_lines = []
+
+    for line in lines:
+
+        if len(line) > 800:
+
+            cleaned_lines.append(line[:800])
+
+        else:
+
+            cleaned_lines.append(line)
+
+    return "\n".join(cleaned_lines) 

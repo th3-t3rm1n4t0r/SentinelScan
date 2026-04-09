@@ -1,7 +1,8 @@
 import requests
 import logging
 import time
-from typing import Dict
+
+from typing import Dict, Any
 
 from app.config import settings
 
@@ -35,10 +36,25 @@ N8N_TOKEN = getattr(
 
 )
 
+MAX_RETRIES = getattr(
 
-MAX_RETRIES = 3
+    settings,
 
-TIMEOUT = 20
+    "WEBHOOK_RETRIES",
+
+    3
+
+)
+
+TIMEOUT = getattr(
+
+    settings,
+
+    "WEBHOOK_TIMEOUT",
+
+    20
+
+)
 
 
 # =========================
@@ -47,22 +63,16 @@ TIMEOUT = 20
 
 def notify_n8n(
 
-    payload: Dict
+    payload: Dict[str, Any]
 
 ) -> Dict:
 
 
-    if not isinstance(
-
-        payload,
-
-        dict
-
-    ):
+    if not isinstance(payload, dict):
 
         logger.error(
 
-            "Invalid webhook payload"
+            "Webhook payload must be dict"
 
         )
 
@@ -71,6 +81,15 @@ def notify_n8n(
             "status": "invalid_payload"
 
         }
+
+
+    if not payload:
+
+        logger.warning(
+
+            "Webhook payload empty"
+
+        )
 
 
     headers = {
@@ -93,7 +112,7 @@ def notify_n8n(
 
     logger.info(
 
-        f"Sending results to n8n "
+        f"Sending scan result to n8n "
 
         f"url={N8N_WEBHOOK_URL}"
 
@@ -126,6 +145,16 @@ def notify_n8n(
                 timeout=TIMEOUT
 
             )
+
+
+            # retry on 5xx errors
+            if response.status_code >= 500:
+
+                raise requests.exceptions.HTTPError(
+
+                    f"Server error {response.status_code}"
+
+                )
 
 
             response.raise_for_status()
@@ -181,20 +210,25 @@ def notify_n8n(
 
                 f"n8n http error "
 
-                f"{response.status_code} "
+                f"attempt={attempt} "
 
-                f"{response.text}"
+                f"{str(e)}"
 
             )
 
 
-            return {
+            # 4xx usually should not retry
+            if response.status_code < 500:
 
-                "status": "http_error",
+                return {
 
-                "http_status": response.status_code
+                    "status": "http_error",
 
-            }
+                    "http_status": response.status_code,
+
+                    "response": safe_text(response)
+
+                }
 
 
         except Exception as e:
@@ -209,11 +243,26 @@ def notify_n8n(
 
 
         # exponential backoff
-        time.sleep(
+        sleep_time = attempt * 2
 
-            attempt * 2
+        logger.info(
+
+            f"retrying in {sleep_time}s..."
 
         )
+
+        time.sleep(
+
+            sleep_time
+
+        )
+
+
+    logger.error(
+
+        "n8n webhook failed after retries"
+
+    )
 
 
     return {
@@ -222,4 +271,23 @@ def notify_n8n(
 
         "attempts": MAX_RETRIES
 
-    }    
+    }
+
+
+# =========================
+# SAFE RESPONSE TEXT
+# =========================
+
+def safe_text(response):
+
+    try:
+
+        return response.text[:500]
+
+    except Exception:
+
+        return ""   
+    
+    
+    
+    

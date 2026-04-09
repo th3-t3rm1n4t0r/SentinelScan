@@ -1,5 +1,13 @@
 import os
-from typing import List
+import uuid
+import logging
+
+from typing import Optional
+
+
+logger = logging.getLogger(
+    "sentinel_scan.file_utils"
+)
 
 
 # =========================
@@ -31,9 +39,19 @@ def is_supported_file(
 
 ) -> bool:
 
-    return filename.endswith(
+    if not filename:
 
-        SUPPORTED_EXTENSIONS
+        return False
+
+
+    filename = filename.lower()
+
+
+    return any(
+
+        filename.endswith(ext)
+
+        for ext in SUPPORTED_EXTENSIONS
 
     )
 
@@ -48,16 +66,36 @@ def safe_read_file(
 
     max_size: int = 200_000
 
-):
+) -> Optional[str]:
+
 
     try:
 
-        if not os.path.exists(path):
+        if not path:
 
             return None
 
 
-        if os.path.getsize(path) > max_size:
+        path = os.path.abspath(path)
+
+
+        if not os.path.exists(path):
+
+            logger.warning(
+                f"file not found {path}"
+            )
+
+            return None
+
+
+        size = os.path.getsize(path)
+
+
+        if size > max_size:
+
+            logger.warning(
+                f"file too large {path}"
+            )
 
             return None
 
@@ -74,10 +112,23 @@ def safe_read_file(
 
         ) as f:
 
-            return f.read()
+            content = f.read()
 
 
-    except Exception:
+        # skip binary-like files
+        if is_binary(content):
+
+            return None
+
+
+        return content
+
+
+    except Exception as e:
+
+        logger.warning(
+            f"read failed {path} {str(e)}"
+        )
 
         return None
 
@@ -92,13 +143,26 @@ def ensure_dir(
 
 ):
 
-    os.makedirs(
+    if not path:
 
-        path,
+        return
 
-        exist_ok=True
 
-    )
+    try:
+
+        os.makedirs(
+
+            path,
+
+            exist_ok=True
+
+        )
+
+    except Exception as e:
+
+        logger.error(
+            f"dir create failed {path} {str(e)}"
+        )
 
 
 # =========================
@@ -111,11 +175,79 @@ def unique_filename(
 
     extension: str
 
-):
+) -> str:
 
-    import uuid
 
-    uid = str(uuid.uuid4())[:8]
+    prefix = sanitize_filename(
 
-    return f"{prefix}_{uid}.{extension}"    
- 
+        prefix
+
+    )
+
+
+    extension = extension.lower().replace(
+
+        ".",
+
+        ""
+
+    )
+
+
+    uid = str(
+
+        uuid.uuid4()
+
+    )[:8]
+
+
+    return f"{prefix}_{uid}.{extension}"
+
+
+# =========================
+# HELPERS
+# =========================
+
+def sanitize_filename(
+
+    name: str
+
+) -> str:
+
+
+    if not name:
+
+        return "file"
+
+
+    return "".join(
+
+        c for c in name
+
+        if c.isalnum() or c in ("_", "-")
+
+    )[:60]
+
+
+def is_binary(
+
+    text: str
+
+) -> bool:
+
+
+    if not text:
+
+        return False
+
+
+    non_printable = sum(
+
+        1 for c in text
+
+        if ord(c) < 9 or (13 < ord(c) < 32)
+
+    )
+
+
+    return non_printable > 20  

@@ -3,13 +3,12 @@ import asyncio
 import logging
 import base64
 
-from typing import List, Dict
+from typing import List, Dict, Optional
+
 from app.config import settings
 
 
-logger = logging.getLogger(
-    "sentinel_scan.github"
-)
+logger = logging.getLogger("sentinel_scan.github")
 
 
 # =========================
@@ -17,11 +16,9 @@ logger = logging.getLogger(
 # =========================
 
 MAX_FILES = settings.MAX_FILES
-
 MAX_FILE_SIZE_KB = settings.MAX_FILE_SIZE_KB
 
 MAX_CONCURRENT_REQUESTS = 10
-
 
 SUPPORTED_EXTENSIONS = (
 
@@ -52,14 +49,14 @@ SUPPORTED_EXTENSIONS = (
 
 
 # =========================
-# PUBLIC ENTRY
+# MAIN ENTRY
 # =========================
 
 def get_repo_tree(
 
     repo_url: str,
 
-    branch: str | None = None
+    branch: Optional[str] = None
 
 ) -> List[Dict]:
 
@@ -75,15 +72,18 @@ def get_repo_tree(
 
     )
 
+    logger.info(f"Scanning repo {owner}/{repo}@{branch}")
+
     tree_url = f"{settings.GITHUB_API_BASE}/repos/{owner}/{repo}/git/trees/{branch}?recursive=1"
 
-    tree = safe_request(
+    tree_data = safe_request(
 
         tree_url,
         headers
 
-    ).get("tree", [])
+    )
 
+    tree = tree_data.get("tree", [])
 
     file_urls = []
 
@@ -93,7 +93,6 @@ def get_repo_tree(
             continue
 
         path = item.get("path", "")
-
         size = item.get("size", 0)
 
         if not is_supported_file(path):
@@ -102,29 +101,18 @@ def get_repo_tree(
         if size > MAX_FILE_SIZE_KB * 1024:
             continue
 
-        file_urls.append(
+        # optional safety for large env files
+        if path.endswith(".env") and size > 5 * 1024:
+            continue
 
-            item["url"]
-
-        )
+        file_urls.append(item["url"])
 
         if len(file_urls) >= MAX_FILES:
             break
 
+    logger.info(f"{len(file_urls)} files selected for analysis")
 
-    logger.info(
-
-        f"{repo}@{branch} → {len(file_urls)} files selected"
-
-    )
-
-
-    return run_async_fetch(
-
-        file_urls,
-        headers
-
-    )
+    return run_async_fetch(file_urls, headers)
 
 
 # =========================
@@ -133,9 +121,9 @@ def get_repo_tree(
 
 def safe_request(
 
-    url,
-    headers,
-    retries=2
+    url: str,
+    headers: Dict,
+    retries: int = 2
 
 ):
 
@@ -158,16 +146,12 @@ def safe_request(
         except Exception as e:
 
             logger.warning(
-
                 f"GitHub retry {attempt+1} failed: {str(e)}"
-
             )
 
-    raise Exception(
+            asyncio.sleep(1)
 
-        "GitHub API request failed"
-
-    )
+    raise Exception("GitHub API request failed")
 
 
 # =========================
@@ -183,33 +167,18 @@ def run_async_fetch(
 
     try:
 
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
 
-        if loop.is_running():
+        return loop.create_task(
 
-            return asyncio.run(
+            fetch_all_files(
 
-                fetch_all_files(
-
-                    urls,
-                    headers
-
-                )
+                urls,
+                headers
 
             )
 
-        else:
-
-            return loop.run_until_complete(
-
-                fetch_all_files(
-
-                    urls,
-                    headers
-
-                )
-
-            )
+        )
 
     except RuntimeError:
 
@@ -231,8 +200,8 @@ def run_async_fetch(
 
 async def fetch_all_files(
 
-    urls,
-    headers
+    urls: List[str],
+    headers: Dict
 
 ):
 
@@ -242,11 +211,7 @@ async def fetch_all_files(
 
     )
 
-    async with httpx.AsyncClient(
-
-        timeout=30
-
-    ) as client:
+    async with httpx.AsyncClient(timeout=30) as client:
 
         tasks = [
 
@@ -281,10 +246,10 @@ async def fetch_all_files(
 
 async def fetch_file(
 
-    client,
-    url,
-    headers,
-    semaphore
+    client: httpx.AsyncClient,
+    url: str,
+    headers: Dict,
+    semaphore: asyncio.Semaphore
 
 ):
 
@@ -302,6 +267,10 @@ async def fetch_file(
             r.raise_for_status()
 
             data = r.json()
+
+            if data.get("encoding") != "base64":
+
+                return None
 
             return {
 
@@ -332,7 +301,7 @@ async def fetch_file(
 
 def extract_owner_repo(
 
-    repo_url
+    repo_url: str
 
 ):
 
@@ -370,9 +339,9 @@ def build_headers():
 
 def get_default_branch(
 
-    owner,
-    repo,
-    headers
+    owner: str,
+    repo: str,
+    headers: Dict
 
 ):
 
@@ -393,20 +362,24 @@ def get_default_branch(
 
 def is_supported_file(
 
-    path
+    path: str
 
 ):
 
-    return path.endswith(
+    path = path.lower()
 
-        SUPPORTED_EXTENSIONS
+    return any(
+
+        path.endswith(ext)
+
+        for ext in SUPPORTED_EXTENSIONS
 
     )
 
 
 def decode_base64(
 
-    content
+    content: str
 
 ):
 
@@ -430,5 +403,4 @@ def decode_base64(
 
     except Exception:
 
-        return ""   
-    
+        return "" 

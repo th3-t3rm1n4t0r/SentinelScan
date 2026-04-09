@@ -71,13 +71,25 @@ celery.conf.update(
     # retry behaviour
     # -----------------
 
-    task_default_retry_delay=15,
+    task_default_retry_delay=20,
 
     task_annotations={
 
         "*": {
 
-            "max_retries": 3
+            "max_retries": 3,
+
+            "autoretry_for": (
+
+                Exception,
+
+            ),
+
+            "retry_backoff": True,
+
+            "retry_backoff_max": 120,
+
+            "retry_jitter": True
 
         }
 
@@ -99,83 +111,9 @@ celery.conf.update(
 
     task_routes={
 
-        "workers.scan_tasks.run_scan": {
-
-            "queue": "scan_queue"
-
+        "workers.scan_tasks": {
+            "queue": "scan"
         }
-
-    },
-
-
-    # -----------------
-    # worker performance
-    # -----------------
-
-    worker_concurrency=4,
-
-    worker_disable_rate_limits=True,
-
-
-    # -----------------
-    # memory protection
-    # -----------------
-
-    worker_max_tasks_per_child=30,
-
-    worker_max_memory_per_child=200000,   # 200MB
-
-
-    # -----------------
-    # time limits
-    # -----------------
-
-    task_soft_time_limit=360,   # graceful stop
-
-    task_time_limit=420,        # hard stop
-
-
-    # -----------------
-    # connection stability
-    # -----------------
-
-    broker_connection_retry_on_startup=True,
-
-    broker_connection_max_retries=10,
+    }
 
 )
-
-
-# =========================
-# DEFAULT QUEUE
-# =========================
-
-celery.conf.task_default_queue = "scan_queue"
-
-celery.conf.task_default_exchange = "scan"
-
-celery.conf.task_default_routing_key = "scan.default"
-
-
-# =========================
-# OPTIONAL DEBUG
-# =========================
-
-if settings.DEBUG:
-
-    celery.conf.update(
-
-        task_always_eager=False,
-
-        worker_send_task_events=True
-
-    )
-
-
-# =========================
-# STARTUP LOG
-# =========================
-
-logger.info(
-    "Celery worker ready"
-)   

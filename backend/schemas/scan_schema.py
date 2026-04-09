@@ -1,4 +1,4 @@
-from pydantic import BaseModel, HttpUrl, Field
+from pydantic import BaseModel, HttpUrl, Field, model_validator
 from typing import List, Optional, Dict
 from datetime import datetime
 from enum import Enum
@@ -19,6 +19,16 @@ class SeverityLevel(str, Enum):
     low = "low"
 
 
+class ScanStatus(str, Enum):
+
+    pending = "pending"
+
+    running = "running"
+
+    completed = "completed"
+
+    failed = "failed"
+
 
 # =========================
 # REQUEST SCHEMA
@@ -26,16 +36,64 @@ class SeverityLevel(str, Enum):
 
 class ScanRequest(BaseModel):
 
-    repo_url: Optional[HttpUrl] = None
+    repo_url: Optional[HttpUrl] = Field(
 
-    repository_owner: Optional[str] = None
+        default=None,
 
-    repository_name: Optional[str] = None
+        description="Full GitHub repository URL"
 
-    branch: Optional[str] = None
+    )
 
-    issue_number: Optional[int] = None
+    repository_owner: Optional[str] = Field(
 
+        default=None,
+
+        description="GitHub owner/org"
+
+    )
+
+    repository_name: Optional[str] = Field(
+
+        default=None,
+
+        description="Repository name"
+
+    )
+
+    branch: Optional[str] = Field(
+
+        default="main",
+
+        description="Branch name"
+
+    )
+
+    issue_number: Optional[int] = Field(
+
+        default=None,
+
+        description="GitHub issue reference"
+
+    )
+
+
+    @model_validator(mode="after")
+
+    def validate_repo_input(self):
+
+        if not self.repo_url and not (
+
+            self.repository_owner and self.repository_name
+
+        ):
+
+            raise ValueError(
+
+                "Provide repo_url OR repository_owner + repository_name"
+
+            )
+
+        return self
 
 
 # =========================
@@ -46,22 +104,33 @@ class Finding(BaseModel):
 
     file: str = Field(
 
-        description="file path"
+        description="File path"
 
     )
 
     issue: str = Field(
 
-        description="type of vulnerability"
+        description="Type of vulnerability"
 
     )
 
     severity: SeverityLevel
 
-    line: Optional[int] = None
+    line: Optional[int] = Field(
 
-    snippet: Optional[str] = None
+        default=None,
 
+        description="Line number"
+
+    )
+
+    snippet: Optional[str] = Field(
+
+        default=None,
+
+        description="Code snippet"
+
+    )
 
 
 # =========================
@@ -81,7 +150,6 @@ class FixSuggestion(BaseModel):
     explanation: Optional[str] = None
 
 
-
 # =========================
 # REPORT SUMMARY
 # =========================
@@ -97,13 +165,11 @@ class SeveritySummary(BaseModel):
     low: int = 0
 
 
-
 class ReportSummary(BaseModel):
 
     total_issues: int
 
     severity: SeveritySummary
-
 
 
 # =========================
@@ -127,21 +193,19 @@ class ReportResponse(BaseModel):
     fixes: List[FixSuggestion]
 
 
-
 # =========================
 # TASK RESPONSE
 # =========================
 
 class TaskResponse(BaseModel):
 
-    status: str
+    status: ScanStatus
 
     task_id: Optional[str] = None
 
     message: Optional[str] = None
 
     result: Optional[Dict] = None
-
 
 
 # =========================
@@ -160,7 +224,7 @@ class ScanHistoryResponse(BaseModel):
 
     scan_type: Optional[str] = None
 
-    status: str
+    status: ScanStatus
 
     report_id: Optional[str] = None
 
@@ -179,4 +243,4 @@ class ScanHistoryResponse(BaseModel):
 
     class Config:
 
-        from_attributes = True   # replaces orm_mode in Pydantic v2   
+        from_attributes = True   # Pydantic v2 ORM support      

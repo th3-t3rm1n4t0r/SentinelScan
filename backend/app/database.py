@@ -2,7 +2,14 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, declarative_base
 from sqlalchemy.pool import QueuePool
 
+import logging
+
 from app.config import settings
+
+
+logger = logging.getLogger(
+    "sentinel_scan.database"
+)
 
 
 # =========================
@@ -17,18 +24,24 @@ engine = create_engine(
     poolclass=QueuePool,
 
     pool_size=10,          # persistent connections
-    max_overflow=20,       # temporary extra connections
-    pool_timeout=30,       # wait time for connection
-    pool_recycle=1800,     # recycle connections every 30 min
+    max_overflow=20,       # burst connections
+    pool_timeout=30,       # seconds to wait for connection
+    pool_recycle=1800,     # refresh connection every 30 min
 
     # reliability
-    pool_pre_ping=True,    # check connection before use
+    pool_pre_ping=True,
 
     # debugging
     echo=settings.DEBUG,
 
-    # postgres performance
+    # SQLAlchemy 2.x behaviour
     future=True
+
+)
+
+
+logger.info(
+    "Database engine initialized"
 )
 
 
@@ -74,13 +87,47 @@ def get_db():
 
 
 # =========================
-# HELPER (optional)
+# CREATE TABLES
 # =========================
 
 def create_tables():
 
     """
-    call once on startup if not using alembic
+    Create tables without Alembic.
+    Recommended only for development.
     """
 
-    Base.metadata.create_all(bind=engine)   
+    logger.info(
+        "Creating database tables"
+    )
+
+    Base.metadata.create_all(
+
+        bind=engine
+
+    )
+
+
+# =========================
+# HEALTH CHECK
+# =========================
+
+def check_db_connection() -> bool:
+
+    try:
+
+        with engine.connect() as conn:
+
+            conn.execute("SELECT 1")
+
+        return True
+
+    except Exception as e:
+
+        logger.error(
+
+            f"DB connection failed {str(e)}"
+
+        )
+
+        return False   

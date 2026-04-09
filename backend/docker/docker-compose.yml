@@ -17,6 +17,7 @@ services:
       uvicorn app.main:app
       --host 0.0.0.0
       --port 8000
+      --workers 2
 
     ports:
       - "8000:8000"
@@ -25,6 +26,7 @@ services:
       - ../.env
 
     depends_on:
+
       redis:
         condition: service_healthy
 
@@ -32,12 +34,20 @@ services:
         condition: service_healthy
 
     volumes:
+
       - ../:/app
 
-      # temp scan storage
       - scan_data:/tmp/scans
 
+      - reports_data:/app/reports
+
+      - logs_data:/app/logs
+
     restart: unless-stopped
+
+    networks:
+      - sentinelscan_network
+
 
 
   # =========================
@@ -63,6 +73,7 @@ services:
       - ../.env
 
     depends_on:
+
       redis:
         condition: service_healthy
 
@@ -70,14 +81,24 @@ services:
         condition: service_healthy
 
     volumes:
+
       - ../:/app
+
       - scan_data:/tmp/scans
+
+      - reports_data:/app/reports
+
+      - logs_data:/app/logs
 
     restart: unless-stopped
 
+    networks:
+      - sentinelscan_network
+
+
 
   # =========================
-  # REDIS (QUEUE)
+  # REDIS QUEUE
   # =========================
   redis:
 
@@ -99,6 +120,10 @@ services:
       retries: 5
 
     restart: unless-stopped
+
+    networks:
+      - sentinelscan_network
+
 
 
   # =========================
@@ -136,9 +161,13 @@ services:
 
     restart: unless-stopped
 
+    networks:
+      - sentinelscan_network
+
+
 
   # =========================
-  # OPTIONAL: CELERY MONITOR
+  # CELERY MONITOR
   # =========================
   flower:
 
@@ -150,6 +179,7 @@ services:
       celery
       --broker=redis://redis:6379/0
       flower
+      --port=5555
 
     ports:
       - "5555:5555"
@@ -158,6 +188,19 @@ services:
       - redis
 
     restart: unless-stopped
+
+    networks:
+      - sentinelscan_network
+
+
+
+# =========================
+# NETWORK
+# =========================
+networks:
+
+  sentinelscan_network:
+
 
 
 # =========================
@@ -168,4 +211,8 @@ volumes:
 
   postgres_data:
 
-  scan_data: 
+  scan_data:
+
+  reports_data:
+
+  logs_data:   

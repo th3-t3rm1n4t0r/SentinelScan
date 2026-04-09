@@ -7,28 +7,82 @@ from logging.handlers import RotatingFileHandler
 from app.config import settings
 
 
+# =========================
+# CONFIG
+# =========================
+
 LOG_DIR = os.getenv(
+
     "LOG_DIR",
+
     "logs"
+
 )
 
 os.makedirs(
+
     LOG_DIR,
+
     exist_ok=True
+
 )
 
 
+LOG_FILE = os.path.join(
+
+    LOG_DIR,
+
+    "sentinelscan.log"
+
+)
+
+
+DEFAULT_LEVEL = "INFO"
+
+
+# =========================
+# SETUP LOGGER
+# =========================
+
 def setup_logger():
 
-    log_level = settings.LOG_LEVEL.upper()
+    level_name = getattr(
+
+        settings,
+
+        "LOG_LEVEL",
+
+        DEFAULT_LEVEL
+
+    )
+
+
+    log_level = getattr(
+
+        logging,
+
+        str(level_name).upper(),
+
+        logging.INFO
+
+    )
+
 
     logger = logging.getLogger(
+
         "sentinel_scan"
+
     )
 
+
     logger.setLevel(
+
         log_level
+
     )
+
+
+    logger.propagate = False
 
 
     # prevent duplicate handlers
@@ -49,38 +103,68 @@ def setup_logger():
     # =====================
 
     console_handler = logging.StreamHandler(
+
         sys.stdout
+
     )
+
+
+    console_handler.setLevel(
+
+        log_level
+
+    )
+
 
     console_handler.setFormatter(
+
         formatter
+
     )
 
+
     logger.addHandler(
+
         console_handler
+
     )
 
 
     # =====================
-    # FILE LOG
+    # FILE LOG (ROTATING)
     # =====================
 
     file_handler = RotatingFileHandler(
 
-        f"{LOG_DIR}/sentinelscan.log",
+        LOG_FILE,
 
         maxBytes=2_000_000,
 
-        backupCount=3
+        backupCount=5,
+
+        encoding="utf-8"
 
     )
+
+
+    file_handler.setLevel(
+
+        log_level
+
+    )
+
 
     file_handler.setFormatter(
+
         formatter
+
     )
 
+
     logger.addHandler(
+
         file_handler
+
     )
 
 
@@ -89,25 +173,45 @@ def setup_logger():
     # =====================
 
     logging.getLogger(
+
         "urllib3"
+
     ).setLevel(logging.WARNING)
 
+
     logging.getLogger(
+
         "httpx"
+
     ).setLevel(logging.WARNING)
 
+
     logging.getLogger(
+
         "celery"
+
     ).setLevel(logging.INFO)
 
+
     logging.getLogger(
+
         "openai"
+
+    ).setLevel(logging.WARNING)
+
+
+    logging.getLogger(
+
+        "asyncio"
+
     ).setLevel(logging.WARNING)
 
 
     logger.info(
+
         "Logger initialized"
+
     )
 
 
-    return logger    
+    return logger  

@@ -1,5 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+
 import logging
 
 from api.scan import router as scan_router
@@ -8,18 +9,14 @@ from api.health import router as health_router
 from app.database import Base, engine
 from app.config import settings
 
+from app.logger import setup_logger
+
 
 # =========================
-# LOGGING
+# LOGGER
 # =========================
 
-logging.basicConfig(
-
-    level=settings.LOG_LEVEL,
-
-    format="%(asctime)s | %(levelname)s | %(name)s | %(message)s"
-
-)
+setup_logger()
 
 logger = logging.getLogger(
     "sentinel_scan.main"
@@ -27,33 +24,58 @@ logger = logging.getLogger(
 
 
 # =========================
-# APP
+# FASTAPI APP
 # =========================
 
 app = FastAPI(
 
     title=settings.APP_NAME,
 
-    description="AI powered OWASP vulnerability scanner",
+    description="""
+AI-powered OWASP vulnerability scanner.
+
+Features:
+
+• GitHub repo scanning
+• OWASP Top 10 detection
+• AI-powered fix suggestions
+• automatic Pull Request creation
+• PII masking
+• webhook integration
+""",
 
     version="2.0",
 
     docs_url="/docs",
 
-    redoc_url="/redoc"
+    redoc_url="/redoc",
+
+    openapi_tags=[
+
+        {
+            "name": "Security Scan",
+            "description": "Repository vulnerability scanning"
+        },
+
+        {
+            "name": "System",
+            "description": "Health & system endpoints"
+        }
+
+    ]
 
 )
 
 
 # =========================
-# CORS (frontend access)
+# CORS
 # =========================
 
 app.add_middleware(
 
     CORSMiddleware,
 
-    allow_origins=["*"],
+    allow_origins=settings.CORS_ORIGINS or ["*"],
 
     allow_credentials=True,
 
@@ -69,18 +91,43 @@ app.add_middleware(
 # =========================
 
 @app.on_event("startup")
+def startup_event():
 
-def startup():
+    logger.info(
 
-    logger.info("Creating database tables")
+        "Initializing database"
 
-    Base.metadata.create_all(bind=engine)
+    )
 
-    logger.info("SentinelScan API started")
+    Base.metadata.create_all(
+
+        bind=engine
+
+    )
+
+    logger.info(
+
+        "SentinelScan API started"
+
+    )
 
 
 # =========================
-# ROUTES
+# SHUTDOWN EVENT
+# =========================
+
+@app.on_event("shutdown")
+def shutdown_event():
+
+    logger.info(
+
+        "SentinelScan shutting down"
+
+    )
+
+
+# =========================
+# ROUTERS
 # =========================
 
 app.include_router(
@@ -92,6 +139,7 @@ app.include_router(
     tags=["Security Scan"]
 
 )
+
 
 app.include_router(
 
@@ -105,16 +153,21 @@ app.include_router(
 
 
 # =========================
-# ROOT
+# ROOT ENDPOINT
 # =========================
 
-@app.get("/")
+@app.get(
+    "/",
+    tags=["System"]
+)
 
 def home():
 
     return {
 
-        "message": "SentinelScan backend running",
+        "service": "SentinelScan",
+
+        "status": "running",
 
         "docs": "/docs",
 
@@ -122,4 +175,4 @@ def home():
 
         "version": "2.0"
 
-    }    
+    }   

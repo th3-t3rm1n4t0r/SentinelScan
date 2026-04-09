@@ -1,12 +1,9 @@
-
 import re
 import logging
 from typing import List, Dict
 
 
-logger = logging.getLogger(
-    "sentinel_scan.owasp"
-)
+logger = logging.getLogger("sentinel_scan.owasp")
 
 
 # =========================
@@ -15,29 +12,30 @@ logger = logging.getLogger(
 
 OWASP_PATTERNS = {
 
+    # Injection
     "SQL_INJECTION":
 
         re.compile(
-            r"(SELECT|INSERT|UPDATE|DELETE).*?(\+|\%s|\{)",
+            r"(SELECT|INSERT|UPDATE|DELETE|WHERE).*(\+|%s|f\"|\{)",
             re.IGNORECASE
         ),
-
 
     "COMMAND_INJECTION":
 
         re.compile(
-            r"os\.system|subprocess\.Popen|subprocess\.call|eval\(",
+            r"os\.system|subprocess\.Popen|subprocess\.call|shell=True",
+            re.IGNORECASE
+        ),
+
+    "EVAL_USAGE":
+
+        re.compile(
+            r"\beval\(|\bexec\(",
             re.IGNORECASE
         ),
 
 
-    "PATH_TRAVERSAL":
-
-        re.compile(
-            r"\.\./"
-        ),
-
-
+    # Authentication & Secrets
     "HARDCODED_PASSWORD":
 
         re.compile(
@@ -45,14 +43,12 @@ OWASP_PATTERNS = {
             re.IGNORECASE
         ),
 
-
     "SECRET_KEY":
 
         re.compile(
-            r"(secret|token|api_key)\s*=\s*[\"'][A-Za-z0-9_\-]{16,}[\"']",
+            r"(secret|token|api[_-]?key)\s*=\s*[\"'][A-Za-z0-9_\-]{12,}[\"']",
             re.IGNORECASE
         ),
-
 
     "PRIVATE_KEY":
 
@@ -60,13 +56,11 @@ OWASP_PATTERNS = {
             r"-----BEGIN (RSA|DSA|EC|OPENSSH) PRIVATE KEY-----"
         ),
 
-
     "JWT_TOKEN":
 
         re.compile(
             r"eyJ[A-Za-z0-9_-]+?\.[A-Za-z0-9_-]+?\.[A-Za-z0-9_-]+"
         ),
-
 
     "AWS_KEY":
 
@@ -75,25 +69,51 @@ OWASP_PATTERNS = {
         ),
 
 
+    # File access risks
+    "PATH_TRAVERSAL":
+
+        re.compile(
+            r"\.\./|\.\.\\"
+        ),
+
+
+    # Configuration issues
     "DEBUG_TRUE":
 
         re.compile(
             r"DEBUG\s*=\s*True"
         ),
 
+    "INSECURE_HTTP":
 
+        re.compile(
+            r"http://"
+        ),
+
+
+    # SSRF risk
     "SSRF_RISK":
 
         re.compile(
-            r"requests\.(get|post)\(.+input",
+            r"requests\.(get|post|put|delete)\(.+(input|request)",
             re.IGNORECASE
         ),
 
 
-    "EVAL_USAGE":
+    # Deserialization risk
+    "PICKLE_USAGE":
 
         re.compile(
-            r"\beval\("
+            r"pickle\.loads|yaml\.load\(",
+            re.IGNORECASE
+        ),
+
+
+    # CORS risk
+    "CORS_ALLOW_ALL":
+
+        re.compile(
+            r"Access-Control-Allow-Origin.*\*"
         ),
 
 }
@@ -117,13 +137,19 @@ SEVERITY_MAP = {
 
     "HARDCODED_PASSWORD": "high",
 
+    "EVAL_USAGE": "high",
+
+    "PICKLE_USAGE": "high",
+
     "JWT_TOKEN": "medium",
 
     "PATH_TRAVERSAL": "medium",
 
     "SSRF_RISK": "medium",
 
-    "EVAL_USAGE": "high",
+    "INSECURE_HTTP": "medium",
+
+    "CORS_ALLOW_ALL": "medium",
 
     "DEBUG_TRUE": "low"
 
@@ -160,6 +186,11 @@ def scan_files(
             "unknown"
 
         )
+
+
+        if not content:
+
+            continue
 
 
         lines = content.splitlines()
@@ -200,7 +231,7 @@ def scan_files(
 
     logger.info(
 
-        f"findings total={len(findings)}"
+        f"OWASP findings total={len(findings)}"
 
     )
 
@@ -233,9 +264,21 @@ def summarize_findings(
 
     for f in findings:
 
-        sev = f["severity"]
+        sev = f.get(
+
+            "severity",
+
+            "low"
+
+        )
+
+
+        if sev not in summary:
+
+            summary[sev] = 0
+
 
         summary[sev] += 1
 
 
-    return summary
+    return summary  
