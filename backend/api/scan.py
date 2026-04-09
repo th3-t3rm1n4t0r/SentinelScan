@@ -1,25 +1,131 @@
-from fastapi import APIRouter
-from services.github_service import clone_repo
-from services.security_scanner import scan_code
-from services.ai_service import ai_fix
-from services.report_service import create_report
+from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel
+from celery.result import AsyncResult
 
-router = APIRouter(prefix="/scan")
+from workers.scan_tasks import run_scan
+from workers.celery_worker import celery
+
+
+router = APIRouter()
+
+
+# =========================
+# REQUEST MODEL
+# =========================
+
+class ScanRequest(BaseModel):
+
+    repo_url: str
+
+
+# =========================
+# START SCAN
+# =========================
 
 @router.post("/github")
-def scan_github(data: dict):
-    repo_url = data["repo_url"]
 
-    path = clone_repo(repo_url)
+def scan_github(
 
-    vulnerabilities = scan_code(path)
+    request: ScanRequest
 
-    fixes = ai_fix(vulnerabilities)
+):
 
-    report = create_report(vulnerabilities)
+    if not request.repo_url:
+
+        raise HTTPException(
+
+            status_code=400,
+
+            detail="repo_url required"
+
+        )
+
+
+    task = run_scan.delay(
+
+        request.repo_url
+
+    )
+
 
     return {
-        "vulnerabilities": vulnerabilities,
-        "fixes": fixes,
-        "report": report
+
+        "status": "queued",
+
+        "task_id": task.id,
+
+        "message": "scan started"
+
+    }
+
+
+# =========================
+# CHECK TASK STATUS
+# =========================
+
+@router.get("/status/{task_id}")
+
+def scan_status(
+
+    task_id: str
+
+):
+
+    task_result = AsyncResult(
+
+        task_id,
+
+        app=celery
+
+    )
+
+
+    if task_result.state == "PENDING":
+
+        return {
+
+            "status": "pending"
+
+        }
+
+
+    if task_result.state == "STARTED":
+
+        return {
+
+            "status": "running"
+
+        }
+
+
+    if task_result.state == "SUCCESS":
+
+        return {
+
+            "status": "completed",
+
+            "result": task_result.result
+
+        }
+
+
+    if task_result.state == "FAILURE":
+
+        return {
+
+            "status": "failed",
+
+            "error": str(
+
+                task_result.result
+
+            )
+
+        }
+
+
+    return {
+
+        "status": task_result.state
+
     }
