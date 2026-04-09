@@ -31,12 +31,15 @@ celery = Celery(
 
 
 # =========================
-# CONFIG
+# CONFIGURATION
 # =========================
 
 celery.conf.update(
 
+    # -----------------
     # serialization
+    # -----------------
+
     task_serializer="json",
 
     result_serializer="json",
@@ -44,19 +47,30 @@ celery.conf.update(
     accept_content=["json"],
 
 
+    # -----------------
     # timezone
+    # -----------------
+
     timezone="Asia/Kolkata",
 
     enable_utc=True,
 
 
+    # -----------------
     # reliability
+    # -----------------
+
     task_acks_late=True,
+
+    task_reject_on_worker_lost=True,
 
     worker_prefetch_multiplier=1,
 
 
-    # retry strategy
+    # -----------------
+    # retry behaviour
+    # -----------------
+
     task_default_retry_delay=15,
 
     task_annotations={
@@ -70,13 +84,19 @@ celery.conf.update(
     },
 
 
-    # tracking
+    # -----------------
+    # task tracking
+    # -----------------
+
     task_track_started=True,
 
     result_expires=3600,
 
 
-    # routing queues
+    # -----------------
+    # queue routing
+    # -----------------
+
     task_routes={
 
         "workers.scan_tasks.run_scan": {
@@ -88,20 +108,68 @@ celery.conf.update(
     },
 
 
-    # performance tuning
-    worker_concurrency=2,
+    # -----------------
+    # worker performance
+    # -----------------
+
+    worker_concurrency=4,
+
+    worker_disable_rate_limits=True,
 
 
+    # -----------------
     # memory protection
-    worker_max_tasks_per_child=40,
+    # -----------------
+
+    worker_max_tasks_per_child=30,
+
+    worker_max_memory_per_child=200000,   # 200MB
 
 
-    # task limits
-    task_time_limit=300,
+    # -----------------
+    # time limits
+    # -----------------
 
-    task_soft_time_limit=240,
+    task_soft_time_limit=360,   # graceful stop
+
+    task_time_limit=420,        # hard stop
+
+
+    # -----------------
+    # connection stability
+    # -----------------
+
+    broker_connection_retry_on_startup=True,
+
+    broker_connection_max_retries=10,
 
 )
+
+
+# =========================
+# DEFAULT QUEUE
+# =========================
+
+celery.conf.task_default_queue = "scan_queue"
+
+celery.conf.task_default_exchange = "scan"
+
+celery.conf.task_default_routing_key = "scan.default"
+
+
+# =========================
+# OPTIONAL DEBUG
+# =========================
+
+if settings.DEBUG:
+
+    celery.conf.update(
+
+        task_always_eager=False,
+
+        worker_send_task_events=True
+
+    )
 
 
 # =========================
@@ -109,7 +177,5 @@ celery.conf.update(
 # =========================
 
 logger.info(
-
-    "Celery worker configured"
-
-)
+    "Celery worker ready"
+)   

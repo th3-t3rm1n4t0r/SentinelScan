@@ -4,12 +4,16 @@ import logging
 from datetime import datetime
 
 from services.github_tree_service import get_repo_tree
-from services.owasp_scanner import scan_files
+from services.owasp_scanner import scan_files, summarize_findings
 from services.ai_service import ai_fix
 from services.report_service import create_report
 from services.webhook_service import notify_n8n
 
-from models.scan_model import ScanHistory
+from services.pii_scrubber import mask_pii
+from services.context_selector import select_relevant_files
+from services.github_pr_service import create_fix_pr
+
+from models.scan_history import ScanHistory
 from app.database import SessionLocal
 
 
@@ -19,29 +23,25 @@ logger = logging.getLogger(
 
 
 # =========================
-# MAIN BACKGROUND TASK
+# CELERY TASK
 # =========================
 
 @celery.task(
-
     bind=True,
-
     autoretry_for=(Exception,),
-
     retry_backoff=True,
-
-    retry_kwargs={
-
-        "max_retries": 3
-
-    }
-
+    retry_kwargs={"max_retries": 3}
 )
+
 def run_scan(
 
     self,
 
-    repo_url: str
+    repo_url: str,
+
+    issue_text: str = "",
+
+    issue_number: int = 0
 
 ):
 
@@ -49,39 +49,128 @@ def run_scan(
 
     start_time = datetime.utcnow()
 
+    task_id = self.request.id
+
+
     logger.info(
 
-        f"scan started | repo={repo_url}"
+        f"scan started "
+
+        f"repo={repo_url} "
+
+        f"task={task_id}"
 
     )
+
+
+    # =====================
+    # CREATE DB RECORD
+    # =====================
+
+    scan_record = ScanHistory(
+
+        task_id=task_id,
+
+        repo=repo_url,
+
+        status="running",
+
+        scan_type="repo",
+
+        created_at=start_time
+
+    )
+
+    db.add(scan_record)
+
+    db.commit()
 
 
     try:
 
         # =====================
-        # 1. FETCH REPO FILES
+        # FETCH REPO FILES
         # =====================
 
-        files = get_repo_tree(
+        all_files = get_repo_tree(
 
             repo_url
 
         )
 
+
         logger.info(
 
-            f"files fetched={len(files)}"
+            f"files fetched={len(all_files)}"
 
         )
 
 
         # =====================
-        # 2. OWASP SCAN
+        # CONTEXT FILTER
+        # =====================
+
+        paths = [
+
+            f["path"]
+
+            for f in all_files
+
+        ]
+
+
+        selected_paths = select_relevant_files(
+
+            issue_text,
+
+            paths
+
+        ) if issue_text else paths
+
+
+        files = [
+
+            f for f in all_files
+
+            if f["path"] in selected_paths
+
+        ]
+
+
+        logger.info(
+
+            f"context files={len(files)}"
+
+        )
+
+
+        # =====================
+        # PII SCRUB
+        # =====================
+
+        for f in files:
+
+            f["content"] = mask_pii(
+
+                f.get("content", "")
+
+            )
+
+
+        # =====================
+        # OWASP SCAN
         # =====================
 
         findings = scan_files(
 
             files
+
+        )
+
+
+        severity_summary = summarize_findings(
+
+            findings
 
         )
 
@@ -94,7 +183,7 @@ def run_scan(
 
 
         # =====================
-        # 3. AI FIX SUGGESTIONS
+        # AI FIX
         # =====================
 
         fixes = ai_fix(
@@ -105,7 +194,35 @@ def run_scan(
 
 
         # =====================
-        # 4. CREATE REPORT
+        # CREATE PR
+        # =====================
+
+        pr_url = None
+
+
+        if fixes:
+
+            try:
+
+                pr_url = create_fix_pr(
+
+                    repo_url,
+
+                    fixes
+
+                )
+
+            except Exception as e:
+
+                logger.warning(
+
+                    f"PR creation failed {str(e)}"
+
+                )
+
+
+        # =====================
+        # CREATE REPORT
         # =====================
 
         report = create_report(
@@ -119,40 +236,57 @@ def run_scan(
         )
 
 
+        report["pull_request"] = pr_url
+
+
         # =====================
-        # 5. STORE DB HISTORY
+        # UPDATE DB RECORD
         # =====================
 
-        scan_record = ScanHistory(
+        end_time = datetime.utcnow()
 
-            repo=repo_url,
 
-            status="completed",
+        scan_record.status = "completed"
 
-            created_at=start_time
+        scan_record.report_id = report["report_id"]
+
+        scan_record.total_issues = len(findings)
+
+        scan_record.severity_summary = severity_summary
+
+        scan_record.completed_at = end_time
+
+        scan_record.duration = int(
+
+            (end_time - start_time)
+
+            .total_seconds()
 
         )
 
-        db.add(
-
-            scan_record
-
-        )
 
         db.commit()
 
 
         # =====================
-        # 6. NOTIFY N8N
+        # WEBHOOK CALLBACK
         # =====================
 
         webhook_payload = {
 
-            "repo": repo_url,
+            "task_id": task_id,
+
+            "repo_url": repo_url,
+
+            "issue_number": issue_number,
+
+            "summary": report["summary"],
 
             "report": report,
 
-            "summary": report.get("summary")
+            "pull_request": pr_url,
+
+            "status": "completed"
 
         }
 
@@ -166,58 +300,57 @@ def run_scan(
 
         logger.info(
 
-            f"scan completed | repo={repo_url}"
+            f"scan completed "
+
+            f"task={task_id}"
 
         )
 
 
-        return {
-
-            "status": "completed",
-
-            "repo": repo_url,
-
-            "report": report
-
-        }
+        return webhook_payload
 
 
     except Exception as e:
 
+
         logger.error(
 
-            f"scan failed | {str(e)}"
+            f"scan failed "
+
+            f"task={task_id} "
+
+            f"{str(e)}"
 
         )
 
 
-        # store failure
-        scan_record = ScanHistory(
+        scan_record.status = "failed"
 
-            repo=repo_url,
+        scan_record.error_message = str(e)
 
-            status="failed",
 
-            created_at=start_time
+        scan_record.completed_at = datetime.utcnow()
 
-        )
-
-        db.add(
-
-            scan_record
-
-        )
 
         db.commit()
 
 
-        raise self.retry(
+        notify_n8n({
 
-            exc=e
+            "task_id": task_id,
 
-        )
+            "repo_url": repo_url,
+
+            "status": "failed",
+
+            "error": str(e)
+
+        })
+
+
+        raise self.retry(exc=e)
 
 
     finally:
 
-        db.close()
+        db.close()   

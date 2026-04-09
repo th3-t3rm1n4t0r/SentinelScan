@@ -1,12 +1,13 @@
 import requests
 import logging
-from typing import Dict, Optional
+import time
+from typing import Dict
 
 from app.config import settings
 
 
 logger = logging.getLogger(
-    "sentinel_scan.webhook_callback"
+    "sentinel_scan.webhook"
 )
 
 
@@ -14,7 +15,9 @@ logger = logging.getLogger(
 # CONFIG
 # =========================
 
-N8N_WEBHOOK_URL = settings.__dict__.get(
+N8N_WEBHOOK_URL = getattr(
+
+    settings,
 
     "N8N_WEBHOOK_URL",
 
@@ -22,7 +25,9 @@ N8N_WEBHOOK_URL = settings.__dict__.get(
 
 )
 
-N8N_TOKEN = settings.__dict__.get(
+N8N_TOKEN = getattr(
+
+    settings,
 
     "N8N_TOKEN",
 
@@ -42,16 +47,22 @@ TIMEOUT = 20
 
 def notify_n8n(
 
-    data: Dict
+    payload: Dict
 
 ) -> Dict:
 
 
-    if not isinstance(data, dict):
+    if not isinstance(
+
+        payload,
+
+        dict
+
+    ):
 
         logger.error(
 
-            "invalid webhook payload"
+            "Invalid webhook payload"
 
         )
 
@@ -64,7 +75,9 @@ def notify_n8n(
 
     headers = {
 
-        "Content-Type": "application/json"
+        "Content-Type":
+
+        "application/json"
 
     }
 
@@ -76,6 +89,15 @@ def notify_n8n(
             f"Bearer {N8N_TOKEN}"
 
         )
+
+
+    logger.info(
+
+        f"Sending results to n8n "
+
+        f"url={N8N_WEBHOOK_URL}"
+
+    )
 
 
     # =====================
@@ -90,13 +112,14 @@ def notify_n8n(
 
     ):
 
+
         try:
 
             response = requests.post(
 
                 N8N_WEBHOOK_URL,
 
-                json=data,
+                json=payload,
 
                 headers=headers,
 
@@ -110,9 +133,11 @@ def notify_n8n(
 
             logger.info(
 
-                f"n8n success | "
-                f"attempt={attempt} | "
-                f"status={response.status_code}"
+                f"n8n success "
+
+                f"status={response.status_code} "
+
+                f"attempt={attempt}"
 
             )
 
@@ -132,17 +157,32 @@ def notify_n8n(
 
             logger.warning(
 
-                f"n8n timeout attempt={attempt}"
+                f"n8n timeout "
+
+                f"attempt={attempt}"
 
             )
 
 
-        except requests.exceptions.HTTPError:
+        except requests.exceptions.ConnectionError:
+
+            logger.warning(
+
+                f"n8n connection error "
+
+                f"attempt={attempt}"
+
+            )
+
+
+        except requests.exceptions.HTTPError as e:
 
             logger.error(
 
                 f"n8n http error "
+
                 f"{response.status_code} "
+
                 f"{response.text}"
 
             )
@@ -161,11 +201,19 @@ def notify_n8n(
 
             logger.error(
 
-                f"n8n error attempt={attempt} "
+                f"n8n unexpected error "
 
                 f"{str(e)}"
 
             )
+
+
+        # exponential backoff
+        time.sleep(
+
+            attempt * 2
+
+        )
 
 
     return {
@@ -174,4 +222,4 @@ def notify_n8n(
 
         "attempts": MAX_RETRIES
 
-    }
+    }    

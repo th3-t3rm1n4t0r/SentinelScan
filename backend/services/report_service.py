@@ -6,26 +6,28 @@ from datetime import datetime
 from typing import List, Dict, Optional
 
 
-logger = logging.getLogger("sentinel_scan.report")
+logger = logging.getLogger(
+    "sentinel_scan.report"
+)
 
 
 # =========================
 # CONFIG
 # =========================
 
-REPORT_DIR = "reports"
+REPORT_DIR = os.getenv(
+    "REPORT_DIR",
+    "reports"
+)
 
 os.makedirs(
-
     REPORT_DIR,
-
     exist_ok=True
-
 )
 
 
 # =========================
-# REPORT CREATOR
+# CREATE REPORT
 # =========================
 
 def create_report(
@@ -34,18 +36,17 @@ def create_report(
 
     fixes: Optional[List[Dict]] = None,
 
-    repo: Optional[str] = None
+    repo: Optional[str] = None,
+
+    branch: Optional[str] = None
 
 ) -> Dict:
 
 
     report_id = str(uuid.uuid4())[:8]
 
-    timestamp = datetime.utcnow().strftime(
 
-        "%Y-%m-%d %H:%M:%S"
-
-    )
+    timestamp = datetime.utcnow().isoformat()
 
 
     json_path = f"{REPORT_DIR}/scan_{report_id}.json"
@@ -59,33 +60,30 @@ def create_report(
 
     severity_count = {
 
-        "Critical": 0,
+        "critical": 0,
 
-        "High": 0,
+        "high": 0,
 
-        "Medium": 0,
+        "medium": 0,
 
-        "Low": 0
+        "low": 0
 
     }
 
 
     for f in findings:
 
-        sev = f.get(
+        sev = str(
+            f.get(
+                "severity",
+                "low"
+            )
+        ).lower()
 
-            "severity",
-
-            "Low"
-
-        )
 
         severity_count.setdefault(
-
             sev,
-
             0
-
         )
 
         severity_count[sev] += 1
@@ -96,6 +94,8 @@ def create_report(
         "report_id": report_id,
 
         "repo": repo,
+
+        "branch": branch,
 
         "generated_at": timestamp,
 
@@ -119,23 +119,15 @@ def create_report(
     # =====================
 
     with open(
-
         json_path,
-
         "w",
-
         encoding="utf-8"
-
     ) as f:
 
         json.dump(
-
             report_data,
-
             f,
-
             indent=2
-
         )
 
 
@@ -144,33 +136,23 @@ def create_report(
     # =====================
 
     html_content = build_html_report(
-
         report_data
-
     )
 
 
     with open(
-
         html_path,
-
         "w",
-
         encoding="utf-8"
-
     ) as f:
 
         f.write(
-
             html_content
-
         )
 
 
     logger.info(
-
-        f"report created: {report_id}"
-
+        f"report created {report_id}"
     )
 
 
@@ -188,13 +170,11 @@ def create_report(
 
 
 # =========================
-# HTML BUILDER
+# HTML REPORT
 # =========================
 
 def build_html_report(
-
     data: Dict
-
 ) -> str:
 
 
@@ -203,73 +183,72 @@ def build_html_report(
 
     for f in data["findings"]:
 
-        severity = f.get(
 
-            "severity",
+        severity = str(
+            f.get(
+                "severity",
+                "low"
+            )
+        ).lower()
 
-            "Low"
-
-        )
 
         rows += f"""
 
-        <tr>
+<tr>
 
-            <td>{f.get("file")}</td>
+<td>{escape_html(f.get("file"))}</td>
 
-            <td>{f.get("issue")}</td>
+<td>{escape_html(f.get("issue"))}</td>
 
-            <td class="{severity}">{severity}</td>
+<td class="{severity}">{severity}</td>
 
-            <td>{f.get("line")}</td>
+<td>{f.get("line")}</td>
 
-            <td>
+<td>
 
-                <code>
+<code>
 
-                {escape_html(f.get("snippet",""))}
+{escape_html(f.get("snippet",""))}
 
-                </code>
+</code>
 
-            </td>
+</td>
 
-        </tr>
+</tr>
 
-        """
+"""
 
 
     fixes_html = ""
 
 
     for fix in data.get(
-
         "fixes",
-
         []
-
     ):
+
 
         fixes_html += f"""
 
-        <div class="fix">
+<div class="fix">
 
-            <b>{fix.get("issue")}</b>
+<b>{escape_html(fix.get("issue"))}</b>
 
-            <pre>
+<pre>
 
 {escape_html(fix.get("fix",""))}
 
-            </pre>
+</pre>
 
-            <small>
+<small>
 
 {escape_html(fix.get("explanation",""))}
 
-            </small>
+</small>
 
-        </div>
+</div>
 
-        """
+"""
 
 
     html = f"""
@@ -283,61 +262,97 @@ def build_html_report(
 <style>
 
 body {{
+
 font-family: Arial;
+
 margin: 40px;
+
 background:#f4f6f8;
+
 }}
 
 h1 {{
+
 color:#222;
+
 }}
 
 table {{
+
 border-collapse: collapse;
+
 width:100%;
+
 background:white;
+
 }}
 
 th,td {{
+
 border:1px solid #ddd;
+
 padding:8px;
+
 }}
 
 th {{
+
 background:#111;
+
 color:white;
+
 }}
 
-.Critical {{
+.critical {{
+
 color:red;
+
 font-weight:bold;
+
 }}
 
-.High {{
+.high {{
+
 color:orange;
+
 font-weight:bold;
+
 }}
 
-.Medium {{
+.medium {{
+
 color:#0057d9;
+
 }}
 
-.Low {{
+.low {{
+
 color:#444;
+
 }}
 
 .fix {{
+
 background:white;
+
 padding:12px;
+
 margin:10px 0;
+
 border-left:4px solid #28a745;
+
 }}
 
 .summary-box {{
+
 background:white;
+
 padding:15px;
+
 margin-bottom:20px;
+
 border-radius:6px;
+
 }}
 
 </style>
@@ -350,7 +365,9 @@ border-radius:6px;
 
 <div class="summary-box">
 
-<p><b>Repository:</b> {data.get("repo")}</p>
+<p><b>Repository:</b> {escape_html(data.get("repo"))}</p>
+
+<p><b>Branch:</b> {escape_html(data.get("branch"))}</p>
 
 <p><b>Generated:</b> {data.get("generated_at")}</p>
 
@@ -363,13 +380,13 @@ border-radius:6px;
 
 <ul>
 
-<li>Critical: {data["summary"]["severity"]["Critical"]}</li>
+<li>Critical: {data["summary"]["severity"]["critical"]}</li>
 
-<li>High: {data["summary"]["severity"]["High"]}</li>
+<li>High: {data["summary"]["severity"]["high"]}</li>
 
-<li>Medium: {data["summary"]["severity"]["Medium"]}</li>
+<li>Medium: {data["summary"]["severity"]["medium"]}</li>
 
-<li>Low: {data["summary"]["severity"]["Low"]}</li>
+<li>Low: {data["summary"]["severity"]["low"]}</li>
 
 </ul>
 
@@ -408,7 +425,6 @@ border-radius:6px;
 
 """
 
-
     return html
 
 
@@ -416,15 +432,14 @@ border-radius:6px;
 # HTML ESCAPE
 # =========================
 
-def escape_html(
+def escape_html(text: str) -> str:
 
-    text: str
-
-) -> str:
+    if not text:
+        return ""
 
     return (
 
-        text
+        str(text)
 
         .replace("&", "&amp;")
 
@@ -432,4 +447,4 @@ def escape_html(
 
         .replace(">", "&gt;")
 
-    )
+    )    

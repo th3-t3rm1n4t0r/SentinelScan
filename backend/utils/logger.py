@@ -1,40 +1,113 @@
 import logging
 import sys
+import os
+
+from logging.handlers import RotatingFileHandler
 
 from app.config import settings
+
+
+LOG_DIR = os.getenv(
+    "LOG_DIR",
+    "logs"
+)
+
+os.makedirs(
+    LOG_DIR,
+    exist_ok=True
+)
 
 
 def setup_logger():
 
     log_level = settings.LOG_LEVEL.upper()
 
+    logger = logging.getLogger(
+        "sentinel_scan"
+    )
 
-    logging.basicConfig(
+    logger.setLevel(
+        log_level
+    )
 
-        level=log_level,
 
-        format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
+    # prevent duplicate handlers
+    if logger.handlers:
 
-        handlers=[
+        return logger
 
-            logging.StreamHandler(sys.stdout)
 
-        ]
+    formatter = logging.Formatter(
+
+        "%(asctime)s | %(levelname)s | %(name)s | %(message)s"
 
     )
 
 
-    # reduce noisy logs
-    logging.getLogger("urllib3").setLevel(logging.WARNING)
+    # =====================
+    # CONSOLE LOG
+    # =====================
 
-    logging.getLogger("celery").setLevel(logging.INFO)
+    console_handler = logging.StreamHandler(
+        sys.stdout
+    )
 
-    logging.getLogger("openai").setLevel(logging.WARNING)
+    console_handler.setFormatter(
+        formatter
+    )
+
+    logger.addHandler(
+        console_handler
+    )
 
 
-    logger = logging.getLogger("sentinel_scan")
+    # =====================
+    # FILE LOG
+    # =====================
 
-    logger.info("Logger initialized")
+    file_handler = RotatingFileHandler(
+
+        f"{LOG_DIR}/sentinelscan.log",
+
+        maxBytes=2_000_000,
+
+        backupCount=3
+
+    )
+
+    file_handler.setFormatter(
+        formatter
+    )
+
+    logger.addHandler(
+        file_handler
+    )
 
 
-    return logger
+    # =====================
+    # QUIET NOISY LIBRARIES
+    # =====================
+
+    logging.getLogger(
+        "urllib3"
+    ).setLevel(logging.WARNING)
+
+    logging.getLogger(
+        "httpx"
+    ).setLevel(logging.WARNING)
+
+    logging.getLogger(
+        "celery"
+    ).setLevel(logging.INFO)
+
+    logging.getLogger(
+        "openai"
+    ).setLevel(logging.WARNING)
+
+
+    logger.info(
+        "Logger initialized"
+    )
+
+
+    return logger    

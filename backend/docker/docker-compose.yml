@@ -3,7 +3,7 @@ version: "3.9"
 services:
 
   # =========================
-  # FASTAPI APP
+  # FASTAPI API
   # =========================
   api:
 
@@ -25,13 +25,19 @@ services:
       - ../.env
 
     depends_on:
-      - redis
-      - db
+      redis:
+        condition: service_healthy
+
+      db:
+        condition: service_healthy
 
     volumes:
       - ../:/app
 
-    restart: always
+      # temp scan storage
+      - scan_data:/tmp/scans
+
+    restart: unless-stopped
 
 
   # =========================
@@ -47,26 +53,31 @@ services:
 
     command: >
       celery
-      -A workers.celery_worker
+      -A workers.celery_worker.celery
       worker
       --loglevel=info
       -Q scan_queue
+      --concurrency=2
 
     env_file:
       - ../.env
 
     depends_on:
-      - redis
-      - db
+      redis:
+        condition: service_healthy
+
+      db:
+        condition: service_healthy
 
     volumes:
       - ../:/app
+      - scan_data:/tmp/scans
 
-    restart: always
+    restart: unless-stopped
 
 
   # =========================
-  # REDIS
+  # REDIS (QUEUE)
   # =========================
   redis:
 
@@ -77,11 +88,21 @@ services:
     ports:
       - "6379:6379"
 
-    restart: always
+    healthcheck:
+
+      test: ["CMD", "redis-cli", "ping"]
+
+      interval: 5s
+
+      timeout: 3s
+
+      retries: 5
+
+    restart: unless-stopped
 
 
   # =========================
-  # POSTGRES
+  # POSTGRES DATABASE
   # =========================
   db:
 
@@ -103,7 +124,40 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
 
-    restart: always
+    healthcheck:
+
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+
+      interval: 10s
+
+      timeout: 5s
+
+      retries: 5
+
+    restart: unless-stopped
+
+
+  # =========================
+  # OPTIONAL: CELERY MONITOR
+  # =========================
+  flower:
+
+    image: mher/flower
+
+    container_name: sentinelscan_flower
+
+    command: >
+      celery
+      --broker=redis://redis:6379/0
+      flower
+
+    ports:
+      - "5555:5555"
+
+    depends_on:
+      - redis
+
+    restart: unless-stopped
 
 
 # =========================
@@ -113,3 +167,5 @@ services:
 volumes:
 
   postgres_data:
+
+  scan_data: 

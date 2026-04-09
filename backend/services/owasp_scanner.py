@@ -1,147 +1,137 @@
+
 import re
 import logging
 from typing import List, Dict
 
-logger = logging.getLogger("sentinel_scan.owasp")
+
+logger = logging.getLogger(
+    "sentinel_scan.owasp"
+)
 
 
 # =========================
-# COMPILED PATTERNS
+# OWASP PATTERNS
 # =========================
 
-PATTERNS = [
+OWASP_PATTERNS = {
 
-    {
-        "name": "SQL Injection",
-        "regex": r"(SELECT|INSERT|UPDATE|DELETE).*?\+.*",
-        "severity": "High"
-    },
+    "SQL_INJECTION":
 
-    {
-        "name": "XSS Script Tag",
-        "regex": r"<script.*?>.*?</script>",
-        "severity": "High"
-    },
-
-    {
-        "name": "Command Injection",
-        "regex": r"os\.system|subprocess\.Popen|subprocess\.call",
-        "severity": "High"
-    },
-
-    {
-        "name": "Eval Injection",
-        "regex": r"\beval\s*\(",
-        "severity": "High"
-    },
-
-    {
-        "name": "Hardcoded Secret",
-        "regex": r"(api[_-]?key|secret|token|password)\s*=\s*['\"]",
-        "severity": "Critical"
-    },
-
-    {
-        "name": "JWT Hardcoded Secret",
-        "regex": r"jwt\.encode\(.+['\"]",
-        "severity": "High"
-    },
-
-    {
-        "name": "Debug Enabled",
-        "regex": r"debug\s*=\s*True",
-        "severity": "Medium"
-    },
-
-    {
-        "name": "Weak Random",
-        "regex": r"random\.random\(",
-        "severity": "Medium"
-    },
-
-    {
-        "name": "Weak Hash",
-        "regex": r"hashlib\.md5|hashlib\.sha1",
-        "severity": "High"
-    },
-
-    {
-        "name": "Path Traversal",
-        "regex": r"\.\./",
-        "severity": "High"
-    },
-
-    {
-        "name": "Open Redirect",
-        "regex": r"redirect\(.+\+",
-        "severity": "Medium"
-    },
-
-    {
-        "name": "Pickle Deserialization",
-        "regex": r"pickle\.loads",
-        "severity": "Critical"
-    },
-
-    {
-        "name": "Insecure Temp File",
-        "regex": r"tempfile\.mktemp",
-        "severity": "High"
-    },
-
-    {
-        "name": "Dangerous YAML Load",
-        "regex": r"yaml\.load\(",
-        "severity": "High"
-    },
-
-    {
-        "name": "Hardcoded Private Key",
-        "regex": r"BEGIN RSA PRIVATE KEY",
-        "severity": "Critical"
-    },
-
-    {
-        "name": "Hardcoded AWS Key",
-        "regex": r"AKIA[0-9A-Z]{16}",
-        "severity": "Critical"
-    },
-
-    {
-        "name": "Flask Debug Mode",
-        "regex": r"app\.run\(.*debug\s*=\s*True",
-        "severity": "High"
-    },
-
-    {
-        "name": "Unsafe Deserialization",
-        "regex": r"marshal\.loads|dill\.loads",
-        "severity": "High"
-    },
-
-    {
-        "name": "HTTP instead of HTTPS",
-        "regex": r"http://",
-        "severity": "Low"
-    }
-
-]
+        re.compile(
+            r"(SELECT|INSERT|UPDATE|DELETE).*?(\+|\%s|\{)",
+            re.IGNORECASE
+        ),
 
 
-# precompile regex
-for p in PATTERNS:
+    "COMMAND_INJECTION":
 
-    p["compiled"] = re.compile(
+        re.compile(
+            r"os\.system|subprocess\.Popen|subprocess\.call|eval\(",
+            re.IGNORECASE
+        ),
 
-        p["regex"],
 
-        re.IGNORECASE | re.MULTILINE
+    "PATH_TRAVERSAL":
 
-    )
+        re.compile(
+            r"\.\./"
+        ),
+
+
+    "HARDCODED_PASSWORD":
+
+        re.compile(
+            r"(password|passwd|pwd)\s*=\s*[\"'].*?[\"']",
+            re.IGNORECASE
+        ),
+
+
+    "SECRET_KEY":
+
+        re.compile(
+            r"(secret|token|api_key)\s*=\s*[\"'][A-Za-z0-9_\-]{16,}[\"']",
+            re.IGNORECASE
+        ),
+
+
+    "PRIVATE_KEY":
+
+        re.compile(
+            r"-----BEGIN (RSA|DSA|EC|OPENSSH) PRIVATE KEY-----"
+        ),
+
+
+    "JWT_TOKEN":
+
+        re.compile(
+            r"eyJ[A-Za-z0-9_-]+?\.[A-Za-z0-9_-]+?\.[A-Za-z0-9_-]+"
+        ),
+
+
+    "AWS_KEY":
+
+        re.compile(
+            r"AKIA[0-9A-Z]{16}"
+        ),
+
+
+    "DEBUG_TRUE":
+
+        re.compile(
+            r"DEBUG\s*=\s*True"
+        ),
+
+
+    "SSRF_RISK":
+
+        re.compile(
+            r"requests\.(get|post)\(.+input",
+            re.IGNORECASE
+        ),
+
+
+    "EVAL_USAGE":
+
+        re.compile(
+            r"\beval\("
+        ),
+
+}
 
 
 # =========================
-# SCANNER
+# SEVERITY MAP
+# =========================
+
+SEVERITY_MAP = {
+
+    "SQL_INJECTION": "critical",
+
+    "COMMAND_INJECTION": "critical",
+
+    "PRIVATE_KEY": "critical",
+
+    "AWS_KEY": "critical",
+
+    "SECRET_KEY": "high",
+
+    "HARDCODED_PASSWORD": "high",
+
+    "JWT_TOKEN": "medium",
+
+    "PATH_TRAVERSAL": "medium",
+
+    "SSRF_RISK": "medium",
+
+    "EVAL_USAGE": "high",
+
+    "DEBUG_TRUE": "low"
+
+}
+
+
+# =========================
+# MAIN SCANNER
 # =========================
 
 def scan_files(
@@ -152,62 +142,100 @@ def scan_files(
 
     findings = []
 
-    seen = set()
-
 
     for file in files:
 
-        path = file["path"]
+        content = file.get(
 
-        code = file["code"]
+            "content",
 
-        lines = code.split("\n")
+            ""
 
+        )
 
-        for i, line in enumerate(lines):
+        path = file.get(
 
-            for rule in PATTERNS:
+            "path",
 
-                if rule["compiled"].search(line):
+            "unknown"
 
-                    key = (
-
-                        path,
-
-                        rule["name"],
-
-                        i
-
-                    )
-
-                    if key in seen:
-
-                        continue
+        )
 
 
-                    seen.add(key)
+        lines = content.splitlines()
 
+
+        for i, line in enumerate(
+
+            lines,
+
+            start=1
+
+        ):
+
+            for vuln, pattern in OWASP_PATTERNS.items():
+
+                if pattern.search(line):
 
                     findings.append({
 
                         "file": path,
 
-                        "issue": rule["name"],
+                        "issue": vuln,
 
-                        "severity": rule["severity"],
+                        "severity": SEVERITY_MAP.get(
 
-                        "line": i + 1,
+                            vuln,
 
-                        "snippet": line.strip()
+                            "low"
+
+                        ),
+
+                        "line": i,
+
+                        "snippet": line.strip()[:200]
 
                     })
 
 
     logger.info(
 
-        f"OWASP findings: {len(findings)}"
+        f"findings total={len(findings)}"
 
     )
 
 
     return findings
+
+
+# =========================
+# SUMMARY HELPER
+# =========================
+
+def summarize_findings(
+
+    findings: List[Dict]
+
+):
+
+    summary = {
+
+        "critical": 0,
+
+        "high": 0,
+
+        "medium": 0,
+
+        "low": 0
+
+    }
+
+
+    for f in findings:
+
+        sev = f["severity"]
+
+        summary[sev] += 1
+
+
+    return summary

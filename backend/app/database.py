@@ -1,42 +1,65 @@
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, declarative_base
+from sqlalchemy.pool import QueuePool
+
 from app.config import settings
 
 
-# create SQLAlchemy engine
+# =========================
+# DATABASE ENGINE
+# =========================
+
 engine = create_engine(
 
     settings.DATABASE_URL,
 
-    pool_pre_ping=True,      # checks connection before use
+    # connection pool
+    poolclass=QueuePool,
 
-    pool_size=10,            # number of connections kept ready
+    pool_size=10,          # persistent connections
+    max_overflow=20,       # temporary extra connections
+    pool_timeout=30,       # wait time for connection
+    pool_recycle=1800,     # recycle connections every 30 min
 
-    max_overflow=20,         # extra connections allowed
+    # reliability
+    pool_pre_ping=True,    # check connection before use
 
-    echo=settings.DEBUG      # logs SQL queries when DEBUG=True
+    # debugging
+    echo=settings.DEBUG,
 
+    # postgres performance
+    future=True
 )
 
 
-# session factory
+# =========================
+# SESSION FACTORY
+# =========================
+
 SessionLocal = sessionmaker(
+
+    bind=engine,
 
     autocommit=False,
 
     autoflush=False,
 
-    bind=engine
+    expire_on_commit=False
 
 )
 
 
-# base model class
+# =========================
+# BASE MODEL
+# =========================
+
 Base = declarative_base()
 
 
+# =========================
+# DB DEPENDENCY (FastAPI)
+# =========================
 
-# dependency for FastAPI routes
 def get_db():
 
     db = SessionLocal()
@@ -48,3 +71,16 @@ def get_db():
     finally:
 
         db.close()
+
+
+# =========================
+# HELPER (optional)
+# =========================
+
+def create_tables():
+
+    """
+    call once on startup if not using alembic
+    """
+
+    Base.metadata.create_all(bind=engine)   

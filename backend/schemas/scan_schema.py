@@ -1,6 +1,23 @@
-from pydantic import BaseModel, HttpUrl
+from pydantic import BaseModel, HttpUrl, Field
 from typing import List, Optional, Dict
 from datetime import datetime
+from enum import Enum
+
+
+# =========================
+# ENUMS
+# =========================
+
+class SeverityLevel(str, Enum):
+
+    critical = "critical"
+
+    high = "high"
+
+    medium = "medium"
+
+    low = "low"
+
 
 
 # =========================
@@ -9,9 +26,16 @@ from datetime import datetime
 
 class ScanRequest(BaseModel):
 
-    repo_url: HttpUrl
+    repo_url: Optional[HttpUrl] = None
+
+    repository_owner: Optional[str] = None
+
+    repository_name: Optional[str] = None
 
     branch: Optional[str] = None
+
+    issue_number: Optional[int] = None
+
 
 
 # =========================
@@ -20,15 +44,24 @@ class ScanRequest(BaseModel):
 
 class Finding(BaseModel):
 
-    file: str
+    file: str = Field(
 
-    issue: str
+        description="file path"
 
-    severity: str
+    )
 
-    line: Optional[int]
+    issue: str = Field(
 
-    snippet: Optional[str]
+        description="type of vulnerability"
+
+    )
+
+    severity: SeverityLevel
+
+    line: Optional[int] = None
+
+    snippet: Optional[str] = None
+
 
 
 # =========================
@@ -37,15 +70,16 @@ class Finding(BaseModel):
 
 class FixSuggestion(BaseModel):
 
-    file: Optional[str]
+    file: Optional[str] = None
 
     issue: str
 
-    severity: Optional[str]
+    severity: SeverityLevel
 
-    fix: Optional[str]
+    fix: Optional[str] = None
 
-    explanation: Optional[str]
+    explanation: Optional[str] = None
+
 
 
 # =========================
@@ -54,13 +88,14 @@ class FixSuggestion(BaseModel):
 
 class SeveritySummary(BaseModel):
 
-    Critical: int = 0
+    critical: int = 0
 
-    High: int = 0
+    high: int = 0
 
-    Medium: int = 0
+    medium: int = 0
 
-    Low: int = 0
+    low: int = 0
+
 
 
 class ReportSummary(BaseModel):
@@ -68,6 +103,7 @@ class ReportSummary(BaseModel):
     total_issues: int
 
     severity: SeveritySummary
+
 
 
 # =========================
@@ -80,13 +116,16 @@ class ReportResponse(BaseModel):
 
     repo: str
 
-    generated_at: Optional[str]
+    branch: Optional[str] = None
+
+    generated_at: datetime
 
     summary: ReportSummary
 
     findings: List[Finding]
 
     fixes: List[FixSuggestion]
+
 
 
 # =========================
@@ -104,6 +143,7 @@ class TaskResponse(BaseModel):
     result: Optional[Dict] = None
 
 
+
 # =========================
 # SCAN HISTORY RESPONSE
 # =========================
@@ -112,23 +152,31 @@ class ScanHistoryResponse(BaseModel):
 
     id: int
 
+    task_id: str
+
     repo: str
+
+    branch: Optional[str] = None
+
+    scan_type: Optional[str] = None
 
     status: str
 
-    report_id: Optional[str]
+    report_id: Optional[str] = None
 
     total_issues: int
 
-    severity_summary: Optional[Dict]
+    severity_summary: Optional[Dict] = None
 
     created_at: datetime
 
-    completed_at: Optional[datetime]
+    completed_at: Optional[datetime] = None
 
-    duration: Optional[int]
+    duration: Optional[int] = None
+
+    error_message: Optional[str] = None
 
 
     class Config:
 
-        orm_mode = True
+        from_attributes = True   # replaces orm_mode in Pydantic v2   

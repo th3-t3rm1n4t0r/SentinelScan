@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, DateTime, JSON
+from sqlalchemy import Column, Integer, String, DateTime, JSON, func
 from datetime import datetime
 
 from app.database import Base
@@ -13,7 +13,10 @@ class ScanHistory(Base):
     __tablename__ = "scan_history"
 
 
-    # primary key
+    # =========================
+    # PRIMARY KEY
+    # =========================
+
     id = Column(
 
         Integer,
@@ -25,7 +28,27 @@ class ScanHistory(Base):
     )
 
 
-    # repository scanned
+    # =========================
+    # CELERY TASK LINK
+    # =========================
+
+    task_id = Column(
+
+        String,
+
+        unique=True,
+
+        index=True,
+
+        nullable=False
+
+    )
+
+
+    # =========================
+    # REPOSITORY INFO
+    # =========================
+
     repo = Column(
 
         String,
@@ -37,7 +60,28 @@ class ScanHistory(Base):
     )
 
 
-    # scan status
+    branch = Column(
+
+        String,
+
+        nullable=True
+
+    )
+
+
+    scan_type = Column(
+
+        String,
+
+        default="repo"  # repo | pull_request | webhook
+
+    )
+
+
+    # =========================
+    # STATUS
+    # =========================
+
     status = Column(
 
         String,
@@ -49,17 +93,21 @@ class ScanHistory(Base):
     )
 
 
-    # report reference
+    # =========================
+    # RESULTS
+    # =========================
+
     report_id = Column(
 
         String,
 
-        nullable=True
+        nullable=True,
+
+        index=True
 
     )
 
 
-    # issue count
     total_issues = Column(
 
         Integer,
@@ -69,36 +117,21 @@ class ScanHistory(Base):
     )
 
 
-    # severity breakdown
     severity_summary = Column(
 
         JSON,
 
-        nullable=True
+        nullable=True,
+
+        default=dict
 
     )
 
 
-    # timestamps
-    created_at = Column(
+    # =========================
+    # ERROR TRACKING
+    # =========================
 
-        DateTime,
-
-        default=datetime.utcnow
-
-    )
-
-
-    completed_at = Column(
-
-        DateTime,
-
-        nullable=True
-
-    )
-
-
-    # optional error message
     error_message = Column(
 
         String,
@@ -108,17 +141,28 @@ class ScanHistory(Base):
     )
 
 
-    # optional branch name
-    branch = Column(
+    # =========================
+    # TIMESTAMPS
+    # =========================
 
-        String,
+    created_at = Column(
+
+        DateTime(timezone=True),
+
+        server_default=func.now()
+
+    )
+
+
+    completed_at = Column(
+
+        DateTime(timezone=True),
 
         nullable=True
 
     )
 
 
-    # scan duration seconds
     duration = Column(
 
         Integer,
@@ -126,3 +170,25 @@ class ScanHistory(Base):
         nullable=True
 
     )
+
+
+    # =========================
+    # HELPER METHOD
+    # =========================
+
+    def mark_completed(self):
+
+        self.completed_at = datetime.utcnow()
+
+        if self.created_at:
+
+            self.duration = int(
+
+                (
+                    self.completed_at -
+
+                    self.created_at
+
+                ).total_seconds()
+
+            )  

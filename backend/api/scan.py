@@ -1,12 +1,25 @@
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, HttpUrl
 from celery.result import AsyncResult
+import logging
 
 from workers.scan_tasks import run_scan
 from workers.celery_worker import celery
 
 
-router = APIRouter()
+# =========================
+# LOGGER
+# =========================
+
+logger = logging.getLogger(
+    "sentinel_scan.api"
+)
+
+
+router = APIRouter(
+    prefix="/scan",
+    tags=["Security Scan"]
+)
 
 
 # =========================
@@ -15,7 +28,13 @@ router = APIRouter()
 
 class ScanRequest(BaseModel):
 
-    repo_url: str
+    repo_url: HttpUrl | None = None
+
+    repository_owner: str | None = None
+
+    repository_name: str | None = None
+
+    issue_number: int | None = None
 
 
 # =========================
@@ -24,39 +43,79 @@ class ScanRequest(BaseModel):
 
 @router.post("/github")
 
-def scan_github(
+def scan_github(request: ScanRequest):
 
-    request: ScanRequest
+    try:
 
-):
+        # ---------- build repo url ----------
 
-    if not request.repo_url:
+        if request.repo_url:
 
-        raise HTTPException(
+            repo_url = str(request.repo_url)
 
-            status_code=400,
+        elif request.repository_owner and request.repository_name:
 
-            detail="repo_url required"
+            repo_url = f"https://github.com/{request.repository_owner}/{request.repository_name}"
+
+        else:
+
+            raise HTTPException(
+
+                status_code=400,
+
+                detail="Provide repo_url OR repository_owner + repository_name"
+
+            )
+
+
+        # ---------- normalize issue number ----------
+
+        issue_number = request.issue_number or 0
+
+
+        logger.info(
+
+            f"Scan requested for {repo_url} issue {issue_number}"
+        )
+
+
+        # ---------- start celery task ----------
+
+        task = run_scan.delay(
+
+            repo_url,
+
+            issue_number
 
         )
 
 
-    task = run_scan.delay(
+        return {
 
-        request.repo_url
+            "status": "queued",
 
-    )
+            "task_id": task.id,
+
+            "repo_url": repo_url,
+
+            "issue_number": issue_number,
+
+            "message": "Scan started successfully"
+
+        }
 
 
-    return {
+    except Exception as e:
 
-        "status": "queued",
+        logger.exception("Failed to start scan")
 
-        "task_id": task.id,
+        raise HTTPException(
 
-        "message": "scan started"
+            status_code=500,
 
-    }
+            detail=str(e)
+
+        )
 
 
 # =========================
@@ -65,11 +124,7 @@ def scan_github(
 
 @router.get("/status/{task_id}")
 
-def scan_status(
-
-    task_id: str
-
-):
+def scan_status(task_id: str):
 
     task_result = AsyncResult(
 
@@ -80,25 +135,40 @@ def scan_status(
     )
 
 
-    if task_result.state == "PENDING":
+    state = task_result.state
+
+
+    logger.info(
+
+        f"Task {task_id} status {state}"
+    )
+
+
+    # ---------- celery states ----------
+
+    if state == "PENDING":
 
         return {
 
-            "status": "pending"
+            "status": "pending",
+
+            "message": "Task waiting in queue"
 
         }
 
 
-    if task_result.state == "STARTED":
+    elif state == "STARTED":
 
         return {
 
-            "status": "running"
+            "status": "running",
+
+            "message": "Scan in progress"
 
         }
 
 
-    if task_result.state == "SUCCESS":
+    elif state == "SUCCESS":
 
         return {
 
@@ -109,23 +179,19 @@ def scan_status(
         }
 
 
-    if task_result.state == "FAILURE":
+    elif state == "FAILURE":
 
         return {
 
             "status": "failed",
 
-            "error": str(
-
-                task_result.result
-
-            )
+            "error": str(task_result.result)
 
         }
 
 
     return {
 
-        "status": task_result.state
+        "status": state
 
-    }
+    }   
