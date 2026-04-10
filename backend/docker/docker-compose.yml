@@ -1,5 +1,3 @@
-version: "3.9"
-
 services:
 
   # =========================
@@ -9,7 +7,7 @@ services:
 
     build:
       context: ..
-      dockerfile: Dockerfile
+      dockerfile: docker/Dockerfile
 
     container_name: sentinelscan_api
 
@@ -23,7 +21,7 @@ services:
       - "8000:8000"
 
     env_file:
-      - ../.env
+      - ../../.env
 
     depends_on:
 
@@ -57,7 +55,7 @@ services:
 
     build:
       context: ..
-      dockerfile: Dockerfile
+      dockerfile: docker/Dockerfile
 
     container_name: sentinelscan_worker
 
@@ -70,7 +68,7 @@ services:
       --concurrency=2
 
     env_file:
-      - ../.env
+      - ../../.env
 
     depends_on:
 
