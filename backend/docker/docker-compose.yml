@@ -1,0 +1,218 @@
+version: "3.9"
+
+services:
+
+  # =========================
+  # FASTAPI API
+  # =========================
+  api:
+
+    build:
+      context: ..
+      dockerfile: Dockerfile
+
+    container_name: sentinelscan_api
+
+    command: >
+      uvicorn app.main:app
+      --host 0.0.0.0
+      --port 8000
+      --workers 2
+
+    ports:
+      - "8000:8000"
+
+    env_file:
+      - ../.env
+
+    depends_on:
+
+      redis:
+        condition: service_healthy
+
+      db:
+        condition: service_healthy
+
+    volumes:
+
+      - ../:/app
+
+      - scan_data:/tmp/scans
+
+      - reports_data:/app/reports
+
+      - logs_data:/app/logs
+
+    restart: unless-stopped
+
+    networks:
+      - sentinelscan_network
+
+
+
+  # =========================
+  # CELERY WORKER
+  # =========================
+  worker:
+
+    build:
+      context: ..
+      dockerfile: Dockerfile
+
+    container_name: sentinelscan_worker
+
+    command: >
+      celery
+      -A workers.celery_worker.celery
+      worker
+      --loglevel=info
+      -Q scan_queue
+      --concurrency=2
+
+    env_file:
+      - ../.env
+
+    depends_on:
+
+      redis:
+        condition: service_healthy
+
+      db:
+        condition: service_healthy
+
+    volumes:
+
+      - ../:/app
+
+      - scan_data:/tmp/scans
+
+      - reports_data:/app/reports
+
+      - logs_data:/app/logs
+
+    restart: unless-stopped
+
+    networks:
+      - sentinelscan_network
+
+
+
+  # =========================
+  # REDIS QUEUE
+  # =========================
+  redis:
+
+    image: redis:7-alpine
+
+    container_name: sentinelscan_redis
+
+    ports:
+      - "6379:6379"
+
+    healthcheck:
+
+      test: ["CMD", "redis-cli", "ping"]
+
+      interval: 5s
+
+      timeout: 3s
+
+      retries: 5
+
+    restart: unless-stopped
+
+    networks:
+      - sentinelscan_network
+
+
+
+  # =========================
+  # POSTGRES DATABASE
+  # =========================
+  db:
+
+    image: postgres:15-alpine
+
+    container_name: sentinelscan_postgres
+
+    environment:
+
+      POSTGRES_DB: sentinelscan
+
+      POSTGRES_USER: postgres
+
+      POSTGRES_PASSWORD: postgres
+
+    ports:
+      - "5432:5432"
+
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+    healthcheck:
+
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+
+      interval: 10s
+
+      timeout: 5s
+
+      retries: 5
+
+    restart: unless-stopped
+
+    networks:
+      - sentinelscan_network
+
+
+
+  # =========================
+  # CELERY MONITOR
+  # =========================
+  flower:
+
+    image: mher/flower
+
+    container_name: sentinelscan_flower
+
+    command: >
+      celery
+      --broker=redis://redis:6379/0
+      flower
+      --port=5555
+
+    ports:
+      - "5555:5555"
+
+    depends_on:
+      - redis
+
+    restart: unless-stopped
+
+    networks:
+      - sentinelscan_network
+
+
+
+# =========================
+# NETWORK
+# =========================
+networks:
+
+  sentinelscan_network:
+
+
+
+# =========================
+# VOLUMES
+# =========================
+
+volumes:
+
+  postgres_data:
+
+  scan_data:
+
+  reports_data:
+
+  logs_data:   
