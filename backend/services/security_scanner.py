@@ -8,7 +8,7 @@ patterns = {
     "api_key_exposed": r"api_key"
 }
 
-def scan_code(folder):
+def scan_files(folder):
 
     results = []
 
