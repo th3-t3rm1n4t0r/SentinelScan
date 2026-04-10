@@ -3,12 +3,15 @@ from fastapi.middleware.cors import CORSMiddleware
 
 import logging
 
+# =========================
+# FIXED IMPORT PATHS
+# =========================
+
 from api.scan import router as scan_router
 from api.health import router as health_router
 
 from app.database import Base, engine
 from app.config import settings
-
 from app.logger import setup_logger
 
 
@@ -94,21 +97,15 @@ app.add_middleware(
 def startup_event():
 
     logger.info(
-
         "Initializing database"
-
     )
 
     Base.metadata.create_all(
-
         bind=engine
-
     )
 
     logger.info(
-
         "SentinelScan API started"
-
     )
 
 
@@ -120,9 +117,7 @@ def startup_event():
 def shutdown_event():
 
     logger.info(
-
         "SentinelScan shutting down"
-
     )
 
 
@@ -175,4 +170,4 @@ def home():
 
         "version": "2.0"
 
-    }   
+    } 

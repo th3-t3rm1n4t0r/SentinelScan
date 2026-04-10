@@ -2,6 +2,11 @@ from fastapi import APIRouter, HTTPException, Depends, status
 from celery.result import AsyncResult
 import logging
 
+
+# =========================
+# FIXED IMPORT PATHS
+# =========================
+
 from workers.scan_tasks import run_scan
 from workers.celery_worker import celery
 
@@ -61,29 +66,19 @@ def scan_github(
         if request.repo_url:
 
             repo_url = str(
-
                 request.repo_url
-
             )
 
         elif (
-
             request.repository_owner
-
             and
-
             request.repository_name
-
         ):
 
             repo_url = (
-
                 f"https://github.com/"
-
                 f"{request.repository_owner}/"
-
                 f"{request.repository_name}"
-
             )
 
         else:
@@ -101,9 +96,7 @@ def scan_github(
 
 
         logger.info(
-
             f"scan requested repo={repo_url}"
-
         )
 
 
@@ -115,7 +108,7 @@ def scan_github(
 
             repo_url,
 
-            "",          # issue text optional
+            "",
 
             issue_number
 
@@ -141,9 +134,7 @@ def scan_github(
     except Exception as e:
 
         logger.exception(
-
             "scan start failed"
-
         )
 
 
@@ -189,9 +180,7 @@ def scan_status(
 
 
     logger.info(
-
         f"task status task={task_id} state={state}"
-
     )
 
 
@@ -253,4 +242,4 @@ def scan_status(
 
         task_id=task_id
 
-    ) 
+    )   

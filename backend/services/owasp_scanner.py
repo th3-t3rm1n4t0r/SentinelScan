@@ -1,284 +1,143 @@
 import re
-import logging
 from typing import List, Dict
 
 
-logger = logging.getLogger("sentinel_scan.owasp")
-
-
-# =========================
-# OWASP PATTERNS
-# =========================
-
-OWASP_PATTERNS = {
-
-    # Injection
-    "SQL_INJECTION":
-
-        re.compile(
-            r"(SELECT|INSERT|UPDATE|DELETE|WHERE).*(\+|%s|f\"|\{)",
-            re.IGNORECASE
-        ),
-
-    "COMMAND_INJECTION":
-
-        re.compile(
-            r"os\.system|subprocess\.Popen|subprocess\.call|shell=True",
-            re.IGNORECASE
-        ),
-
-    "EVAL_USAGE":
-
-        re.compile(
-            r"\beval\(|\bexec\(",
-            re.IGNORECASE
-        ),
-
-
-    # Authentication & Secrets
-    "HARDCODED_PASSWORD":
-
-        re.compile(
-            r"(password|passwd|pwd)\s*=\s*[\"'].*?[\"']",
-            re.IGNORECASE
-        ),
-
-    "SECRET_KEY":
-
-        re.compile(
-            r"(secret|token|api[_-]?key)\s*=\s*[\"'][A-Za-z0-9_\-]{12,}[\"']",
-            re.IGNORECASE
-        ),
-
-    "PRIVATE_KEY":
-
-        re.compile(
-            r"-----BEGIN (RSA|DSA|EC|OPENSSH) PRIVATE KEY-----"
-        ),
-
-    "JWT_TOKEN":
-
-        re.compile(
-            r"eyJ[A-Za-z0-9_-]+?\.[A-Za-z0-9_-]+?\.[A-Za-z0-9_-]+"
-        ),
-
-    "AWS_KEY":
-
-        re.compile(
-            r"AKIA[0-9A-Z]{16}"
-        ),
-
-
-    # File access risks
-    "PATH_TRAVERSAL":
-
-        re.compile(
-            r"\.\./|\.\.\\"
-        ),
-
-
-    # Configuration issues
-    "DEBUG_TRUE":
-
-        re.compile(
-            r"DEBUG\s*=\s*True"
-        ),
-
-    "INSECURE_HTTP":
-
-        re.compile(
-            r"http://"
-        ),
-
-
-    # SSRF risk
-    "SSRF_RISK":
-
-        re.compile(
-            r"requests\.(get|post|put|delete)\(.+(input|request)",
-            re.IGNORECASE
-        ),
-
-
-    # Deserialization risk
-    "PICKLE_USAGE":
-
-        re.compile(
-            r"pickle\.loads|yaml\.load\(",
-            re.IGNORECASE
-        ),
-
-
-    # CORS risk
-    "CORS_ALLOW_ALL":
-
-        re.compile(
-            r"Access-Control-Allow-Origin.*\*"
-        ),
-
-}
-
-
-# =========================
-# SEVERITY MAP
-# =========================
-
-SEVERITY_MAP = {
-
-    "SQL_INJECTION": "critical",
-
-    "COMMAND_INJECTION": "critical",
-
-    "PRIVATE_KEY": "critical",
-
-    "AWS_KEY": "critical",
-
-    "SECRET_KEY": "high",
-
-    "HARDCODED_PASSWORD": "high",
-
-    "EVAL_USAGE": "high",
-
-    "PICKLE_USAGE": "high",
-
-    "JWT_TOKEN": "medium",
-
-    "PATH_TRAVERSAL": "medium",
-
-    "SSRF_RISK": "medium",
-
-    "INSECURE_HTTP": "medium",
-
-    "CORS_ALLOW_ALL": "medium",
-
-    "DEBUG_TRUE": "low"
-
-}
-
-
-# =========================
-# MAIN SCANNER
-# =========================
-
-def scan_files(
-
-    files: List[Dict]
-
-) -> List[Dict]:
-
-    findings = []
-
-
-    for file in files:
-
-        content = file.get(
-
-            "content",
-
-            ""
-
-        )
-
-        path = file.get(
-
-            "path",
-
-            "unknown"
-
-        )
-
-
-        if not content:
-
-            continue
-
-
-        lines = content.splitlines()
-
-
-        for i, line in enumerate(
-
-            lines,
-
-            start=1
-
-        ):
-
-            for vuln, pattern in OWASP_PATTERNS.items():
-
-                if pattern.search(line):
-
-                    findings.append({
-
-                        "file": path,
-
-                        "issue": vuln,
-
-                        "severity": SEVERITY_MAP.get(
-
-                            vuln,
-
-                            "low"
-
-                        ),
-
-                        "line": i,
-
-                        "snippet": line.strip()[:200]
-
-                    })
-
-
-    logger.info(
-
-        f"OWASP findings total={len(findings)}"
-
+# =============================
+# SQL Injection Detection
+# =============================
+# Detect ONLY unsafe string building in SQL queries
+# Ignore parameterized queries (%s, ?, :param)
+
+SQL_INJECTION_PATTERN = re.compile(
+    r"""
+    (SELECT|INSERT|UPDATE|DELETE)     # SQL keywords
+    .*                                # anything
+    (
+        \+                            # string concat
+        | f["']                       # f-string
+        | \%                          # % formatting
+        | \.format\(                  # .format()
     )
+    .*                                # anything
+    (input\(|request\.|params\[|form\[)
+    """,
+    re.IGNORECASE | re.VERBOSE,
+)
 
 
-    return findings
+def detect_sql_injection(code: str):
+
+    if SQL_INJECTION_PATTERN.search(code):
+
+        return {
+            "type": "SQL Injection",
+            "severity": "HIGH",
+            "message": "SQL query built using string concatenation",
+        }
+
+    return None
 
 
-# =========================
-# SUMMARY HELPER
-# =========================
+# =============================
+# Insecure HTTP Detection
+# =============================
+# flag only real external HTTP APIs
+# ignore localhost, w3.org, xml schemas
 
-def summarize_findings(
+INSECURE_HTTP_PATTERN = re.compile(
+    r"""
+    http://
+    (?!localhost|127\.0\.0\.1|0\.0\.0\.0)
+    (?!www\.w3\.org)
+    (?!schemas\.xmlsoap\.org)
+    (?!xmlns)
+    [a-zA-Z0-9\.-]+\.[a-zA-Z]{2,}
+    """,
+    re.IGNORECASE | re.VERBOSE,
+)
 
-    findings: List[Dict]
 
-):
+def detect_insecure_http(code: str):
 
-    summary = {
+    if INSECURE_HTTP_PATTERN.search(code):
 
-        "critical": 0,
+        return {
+            "type": "Insecure HTTP",
+            "severity": "MEDIUM",
+            "message": "External API using HTTP instead of HTTPS",
+        }
 
-        "high": 0,
+    return None
 
-        "medium": 0,
 
-        "low": 0
+# =============================
+# Optional extra OWASP checks
+# =============================
 
-    }
+HARDCODED_SECRET_PATTERN = re.compile(
+    r"(API_KEY|SECRET|PASSWORD)\s*=\s*['\"].+['\"]",
+    re.IGNORECASE,
+)
 
+def detect_secrets(code: str):
+
+    if HARDCODED_SECRET_PATTERN.search(code):
+
+        return {
+            "type": "Hardcoded Secret",
+            "severity": "HIGH",
+            "message": "Possible hardcoded credential",
+        }
+
+    return None
+
+
+# =============================
+# Optimize results before AI
+# =============================
+
+def optimize_results(findings: List[Dict]):
+
+    # remove duplicates
+    unique = {}
 
     for f in findings:
 
-        sev = f.get(
+        key = f["type"] + f["message"]
 
-            "severity",
+        unique[key] = f
 
-            "low"
+    findings = list(unique.values())
 
-        )
+    # send only important issues to OpenAI
+    IMPORTANT = ["HIGH", "CRITICAL"]
+
+    findings = [f for f in findings if f["severity"] in IMPORTANT]
+
+    # limit results (prevent token overflow)
+    MAX_RESULTS = 15
+
+    return findings[:MAX_RESULTS]
 
 
-        if sev not in summary:
+# =============================
+# Main scan function
+# =============================
 
-            summary[sev] = 0
+def scan_code(code: str):
 
+    findings = []
 
-        summary[sev] += 1
+    sql_issue = detect_sql_injection(code)
+    if sql_issue:
+        findings.append(sql_issue)
 
+    http_issue = detect_insecure_http(code)
+    if http_issue:
+        findings.append(http_issue)
 
-    return summary  
+    secret_issue = detect_secrets(code)
+    if secret_issue:
+        findings.append(secret_issue)
+
+    return optimize_results(findings) 
