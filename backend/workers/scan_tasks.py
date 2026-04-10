@@ -149,7 +149,7 @@ def run_scan(
         # AI FIX SUGGESTIONS
         # =====================
 
-        ai_results = analyze_code(files)
+        ai_results = analyze_code(findings)
 
         fixes = ai_results.get(
 

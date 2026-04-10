@@ -2,6 +2,7 @@ import httpx
 import asyncio
 import logging
 import base64
+import re
 
 from typing import List, Dict
 
@@ -9,7 +10,7 @@ from app.config import settings
 
 
 logger = logging.getLogger(
-    "sentinel_scan.github"
+    "sentinel_scan.pii"
 )
 
 
@@ -377,3 +378,22 @@ def decode_base64(
     except Exception:
 
         return ""
+    
+
+PII_PATTERNS = [
+    {"name": "AADHAAR_CARD", "regex": re.compile(r"\b[2-9]\d{3}[\s\-]?\d{4}[\s\-]?\d{4}\b")},
+    {"name": "PAN_CARD", "regex": re.compile(r"\b[A-Z]{5}\d{4}[A-Z]\b")},
+    {"name": "INDIAN_PHONE", "regex": re.compile(r"\b(?:\+91[\s\-]?|91[\s\-]?|0[\s\-]?)?[1-9](?:[\s\-]?\d){9}\b")},
+
+]
+
+def mask_pii(code_string: str) -> str:
+    masked_code = code_string
+
+    if not code_string:
+        return ""
+    
+    for label, pattern in PII_PATTERNS.items():
+        masked_code = pattern.sub(f"[MASKED_{label}]", masked_code)
+
+    return masked_code
